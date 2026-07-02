@@ -892,16 +892,49 @@ function syncMeshes() {
 function updateSnakeVisuals() {
   syncMeshes();
 
+  const t = performance.now() * 0.001;
+  const worldUp = new THREE.Vector3(0, 1, 0);
+
   for (let i = 0; i < snake.length; i++) {
-    snakeMeshes[i].position.copy(snake[i]);
+    const mesh = snakeMeshes[i];
+    const wave = Math.sin(t * 8 - i * 0.55);
+    const taper = 1 - Math.min(i / snake.length, 1) * 0.18;
+    const up = underground ? worldUp.clone() : snake[i].clone().normalize();
+    const segmentForward = i === 0
+      ? forward.clone()
+      : snake[i - 1].clone().sub(snake[Math.min(i + 1, snake.length - 1)]);
 
-    const up = underground ? new THREE.Vector3(0, 1, 0) : snake[i].clone().normalize();
-    snakeMeshes[i].quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), up);
+    if (underground) {
+      segmentForward.y = 0;
+    } else {
+      segmentForward.sub(up.clone().multiplyScalar(segmentForward.dot(up)));
+    }
 
-    const hue = 0.39 + Math.sin((i * 0.18) + performance.now() * 0.003) * 0.035;
-    snakeMeshes[i].material.color.setHSL(underground ? 0.28 : (i === 0 ? 0.43 : hue), underground ? 0.85 : 1, i === 0 ? 0.82 : 0.46);
-    snakeMeshes[i].material.emissive.setHSL(underground ? 0.08 : 0.42, 1, i === 0 ? 0.12 : 0.055);
-    snakeMeshes[i].scale.setScalar(i === 0 ? 1.28 : 1 - Math.min(i / snake.length, 1) * 0.18);
+    if (segmentForward.lengthSq() < 0.0001) segmentForward.copy(forward);
+    segmentForward.normalize();
+
+    const right = up.clone().cross(segmentForward).normalize();
+    if (right.lengthSq() < 0.0001) right.set(1, 0, 0);
+    const correctedForward = right.clone().cross(up).normalize();
+    const orientation = new THREE.Matrix4().makeBasis(right, up, correctedForward);
+
+    mesh.position.copy(snake[i]);
+    if (i > 0) mesh.position.add(right.multiplyScalar(wave * 0.045));
+    mesh.quaternion.setFromRotationMatrix(orientation);
+
+    const hue = 0.39 + Math.sin((i * 0.18) + t * 8) * 0.035;
+    const glow = i === 0 ? 0.12 + wave * 0.018 : 0.055 + wave * 0.012;
+    mesh.material.color.setHSL(underground ? 0.28 : (i === 0 ? 0.43 : hue), underground ? 0.85 : 1, i === 0 ? 0.82 : 0.46);
+    mesh.material.emissive.setHSL(underground ? 0.08 : 0.42, 1, glow);
+
+    if (i === 0) {
+      const headPulse = 1.28 + wave * 0.035;
+      mesh.scale.set(headPulse * 1.04, headPulse, headPulse * 1.08);
+    } else {
+      const stretch = 1 + wave * 0.12;
+      const squash = 1 - wave * 0.06;
+      mesh.scale.set(taper * squash, taper * squash, taper * stretch);
+    }
   }
 }
 
