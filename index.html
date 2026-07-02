@@ -57,7 +57,7 @@
 
     .stats {
       display: grid;
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(6, 1fr);
       gap: 8px;
       margin-bottom: 14px;
     }
@@ -297,20 +297,21 @@
 
 <div id="ui">
   <h1>Snake Planet Odyssey</h1>
-  <p class="subtitle">Collect comet fruit, dodge crystal meteors, then burrow into muddy tunnels to hide and forage.</p>
+  <p class="subtitle">Collect comet fruit, board the airplane for 10s flying bonuses, then burrow into muddy tunnels to hide and forage.</p>
   <div class="stats">
     <div class="stat"><span>Score</span><strong id="score">0</strong></div>
     <div class="stat"><span>Best</span><strong id="best">0</strong></div>
     <div class="stat"><span>Level</span><strong id="level">1</strong></div>
     <div class="stat"><span>Combo</span><strong id="combo">x1</strong></div>
     <div class="stat"><span>Shield</span><strong id="shield">0</strong></div>
+    <div class="stat"><span>Flight</span><strong id="flight">0s</strong></div>
   </div>
   <div class="controls">
     <div><span class="key">A</span><span class="key">D</span>or arrows to carve across the planet</div>
     <div><span class="key">W</span>or <span class="key">↑</span>to boost while energy lasts</div>
     <div><span class="key">S</span>or <span class="key">↓</span>burrow underground · <span class="key">Space</span>jump back up</div>
     <div><span class="key">E</span>leave underground piano · <span class="key">A</span>-<span class="key">K</span>keys become piano notes</div>
-    <div><span class="key">Space</span>restart after a crash · blue relics grant shields</div>
+    <div><span class="key">Space</span>restart after a crash · board the airplane, then smash skyline towers for bonus points</div>
   </div>
   <div id="message">Eat glowing fruit to spawn more hazards.</div>
 </div>
@@ -364,6 +365,8 @@ scene.add(rimLight);
 
 const R = 8;
 const SURFACE = R + 0.35;
+const FLYING_SURFACE = R + 2.35;
+const FLIGHT_DURATION = 10;
 const UNDERGROUND_Y = -11.5;
 const TUNNEL_LIMIT = 8.2;
 const scoreText = document.getElementById("score");
@@ -371,6 +374,7 @@ const bestText = document.getElementById("best");
 const levelText = document.getElementById("level");
 const comboText = document.getElementById("combo");
 const shieldText = document.getElementById("shield");
+const flightText = document.getElementById("flight");
 const messageText = document.getElementById("message");
 const boostMeter = document.getElementById("boostMeter");
 const boostFill = document.getElementById("boostFill");
@@ -413,6 +417,11 @@ let landmarkMeshes = [];
 let particles = [];
 let powerUpPos;
 let powerUpMesh;
+let airplanePos;
+let airplaneMesh;
+let buildingMeshes = [];
+let flyingMode = false;
+let flyingTimer = 0;
 let undergroundFoodPos;
 let undergroundFoodMesh;
 let undergroundGroup;
@@ -836,14 +845,15 @@ function moveUnderground(distance) {
 }
 
 function moveOnSphere(distance) {
+  const targetRadius = flyingMode ? FLYING_SURFACE : SURFACE;
   const up = headPos.clone().normalize();
   forward.projectOnPlane(up).normalize();
 
   const axis = new THREE.Vector3().crossVectors(up, forward).normalize();
-  const angle = distance / R;
+  const angle = distance / targetRadius;
 
   headPos.applyAxisAngle(axis, angle);
-  headPos.normalize().multiplyScalar(SURFACE);
+  headPos.normalize().multiplyScalar(targetRadius);
 
   const newUp = headPos.clone().normalize();
   forward.applyAxisAngle(axis, angle);
@@ -995,6 +1005,8 @@ function beginBurrowTransition(direction) {
   cloudGroup.visible = true;
   obstacleMeshes.forEach(mesh => mesh.visible = !goingDown);
   landmarkMeshes.forEach(mesh => mesh.visible = !goingDown);
+  buildingMeshes.forEach(mesh => mesh.visible = !goingDown && flyingMode);
+  if (airplaneMesh) airplaneMesh.visible = !goingDown && !flyingMode;
   if (foodMesh) foodMesh.visible = !goingDown;
   if (powerUpMesh) powerUpMesh.visible = !goingDown;
 
@@ -1037,6 +1049,8 @@ function finishBurrowTransition() {
     cloudGroup.visible = true;
     obstacleMeshes.forEach(mesh => mesh.visible = true);
     landmarkMeshes.forEach(mesh => mesh.visible = true);
+    buildingMeshes.forEach(mesh => mesh.visible = flyingMode);
+    if (airplaneMesh) airplaneMesh.visible = !flyingMode;
     if (foodMesh) foodMesh.visible = true;
     if (powerUpMesh) powerUpMesh.visible = true;
     forward.set(1, 0, 0).projectOnPlane(headPos.clone().normalize()).normalize();
@@ -1094,7 +1108,7 @@ function updateBurrowTransition(delta) {
 }
 
 function enterUnderground() {
-  if (underground || burrowTransition || gameOver) return;
+  if (underground || burrowTransition || gameOver || flyingMode) return;
   beginBurrowTransition("down");
 }
 
@@ -1148,6 +1162,101 @@ function clearPowerUp() {
   if (powerUpMesh) scene.remove(powerUpMesh);
   powerUpMesh = null;
   powerUpPos = null;
+}
+
+function createAirplane() {
+  if (airplaneMesh) scene.remove(airplaneMesh);
+
+  let nextAirplanePos = null;
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const candidate = randomPointOnSphere(R + 0.9);
+    if (farFromSnake(candidate, 2.2) && (!foodPos || candidate.distanceTo(foodPos) > 2.2) && obstacleMeshes.every(o => o.position.distanceTo(candidate) > 1.8)) {
+      nextAirplanePos = candidate;
+      break;
+    }
+  }
+  airplanePos = nextAirplanePos || randomPointOnSphere(R + 0.9);
+
+  const group = new THREE.Group();
+  const bodyMaterial = new THREE.MeshStandardMaterial({ color:0xf7f8ff, emissive:0x24345f, roughness:0.28, metalness:0.24 });
+  const wingMaterial = new THREE.MeshStandardMaterial({ color:0xffd166, emissive:0x4a2c04, roughness:0.32, metalness:0.12 });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.14, 0.72, 6, 14), bodyMaterial);
+  body.rotation.z = Math.PI / 2;
+  body.castShadow = true;
+  group.add(body);
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.04, 0.045), wingMaterial);
+  wing.castShadow = true;
+  group.add(wing);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.38, 0.045), wingMaterial);
+  tail.position.x = -0.4;
+  tail.position.z = 0.16;
+  tail.castShadow = true;
+  group.add(tail);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.24, 16), new THREE.MeshStandardMaterial({ color:0x67ffc5, emissive:0x0d4a33, roughness:0.2, metalness:0.2 }));
+  nose.rotation.z = -Math.PI / 2;
+  nose.position.x = 0.48;
+  group.add(nose);
+  const glow = new THREE.PointLight(0xffd166, 0.85, 3.8, 2);
+  group.add(glow);
+  group.userData.glow = glow;
+  group.position.copy(airplanePos);
+  orientObjectOnSphere(group, airplanePos);
+  scene.add(group);
+  airplaneMesh = group;
+}
+
+function createBuilding(pos) {
+  const height = 0.75 + Math.random() * 1.25;
+  const building = new THREE.Mesh(
+    new THREE.BoxGeometry(0.34 + Math.random() * 0.16, height, 0.34 + Math.random() * 0.16),
+    new THREE.MeshStandardMaterial({ color:0x33415f, emissive:0x071025, roughness:0.48, metalness:0.18 })
+  );
+  building.position.copy(pos || randomPointOnSphere(FLYING_SURFACE));
+  building.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), building.position.clone().normalize());
+  building.userData.baseScale = building.scale.clone();
+  building.userData.phase = Math.random() * Math.PI * 2;
+  building.castShadow = true;
+  scene.add(building);
+  buildingMeshes.push(building);
+}
+
+function resetBuildings() {
+  buildingMeshes.forEach(mesh => scene.remove(mesh));
+  buildingMeshes = [];
+  for (let i = 0; i < 12; i++) createBuilding();
+}
+
+function orientObjectOnSphere(object, pos) {
+  const up = pos.clone().normalize();
+  const tangent = new THREE.Vector3(1, 0, 0).projectOnPlane(up).normalize();
+  if (tangent.lengthSq() < 0.001) tangent.set(0, 0, 1).projectOnPlane(up).normalize();
+  const right = up.clone().cross(tangent).normalize();
+  const orientation = new THREE.Matrix4().makeBasis(tangent, up, right);
+  object.quaternion.setFromRotationMatrix(orientation);
+}
+
+function setFlyingMode(enabled) {
+  if (flyingMode === enabled) return;
+  flyingMode = enabled;
+  flyingTimer = enabled ? FLIGHT_DURATION : 0;
+  flightText.textContent = enabled ? `${Math.ceil(flyingTimer)}s` : "0s";
+  const radius = enabled ? FLYING_SURFACE : SURFACE;
+  snake = snake.map(part => part.clone().normalize().multiplyScalar(radius));
+  headPos.copy(snake[0]);
+  safeUntil = Math.max(safeUntil, elapsedTime + 1.2);
+  boost = 1;
+  boostFill.style.width = "100%";
+  updateBoostWarning();
+  if (enabled) {
+    if (airplaneMesh) airplaneMesh.visible = false;
+  } else {
+    createAirplane();
+  }
+  buildingMeshes.forEach(mesh => mesh.visible = enabled);
+  showToast(enabled ? "Flying mode!" : "Touchdown!");
+  messageText.textContent = enabled
+    ? "Flying bonus: crash through skyline towers for +2 points before the 10 second timer ends!"
+    : "The airplane is ready on the surface for another flying bonus run.";
 }
 
 function createObstacle() {
@@ -1269,6 +1378,8 @@ function resetGame() {
   comboTimer = 0;
   shield = 0;
   boost = 1;
+  flyingMode = false;
+  flyingTimer = 0;
   underground = false;
   burrowTransition = null;
   elapsedTime = 0;
@@ -1279,6 +1390,7 @@ function resetGame() {
   levelText.textContent = level;
   comboText.textContent = "x1";
   shieldText.textContent = shield;
+  flightText.textContent = "0s";
   messageText.textContent = "Eat glowing fruit to build combos. Blue relics grant shields.";
   boostFill.style.width = "100%";
   updateBoostWarning();
@@ -1296,6 +1408,11 @@ function resetGame() {
   particles.forEach(p => scene.remove(p));
   particles = [];
   clearPowerUp();
+  if (airplaneMesh) scene.remove(airplaneMesh);
+  airplaneMesh = null;
+  airplanePos = null;
+  resetBuildings();
+  buildingMeshes.forEach(mesh => mesh.visible = false);
   if (undergroundGroup) undergroundGroup.visible = false;
   planet.visible = true;
   atmosphere.visible = true;
@@ -1317,6 +1434,7 @@ function resetGame() {
   syncMeshes();
   resetObstacles();
   createFood();
+  createAirplane();
   if (!landmarkMeshes.length) createLandmarks();
   updateCamera(true);
   updateMinimap();
@@ -1532,6 +1650,24 @@ function updateMinimap() {
     };
   }
 
+  buildingMeshes.forEach(building => {
+    const p = project(building.position);
+    mapCtx.fillStyle = flyingMode ? "#ff8f4d" : "rgba(255,143,77,.24)";
+    mapCtx.fillRect(p.x - 3, p.y - 3, 6, 6);
+  });
+
+  if (airplanePos && !flyingMode) {
+    const plane = project(airplanePos);
+    mapCtx.beginPath();
+    mapCtx.moveTo(plane.x + 7, plane.y);
+    mapCtx.lineTo(plane.x - 5, plane.y - 5);
+    mapCtx.lineTo(plane.x - 2, plane.y);
+    mapCtx.lineTo(plane.x - 5, plane.y + 5);
+    mapCtx.closePath();
+    mapCtx.fillStyle = "#ffd166";
+    mapCtx.fill();
+  }
+
   obstacleMeshes.forEach(obstacle => {
     const p = project(obstacle.position);
     mapCtx.beginPath();
@@ -1652,6 +1788,12 @@ function update(delta) {
   if (updateBurrowTransition(delta)) return;
   if (!underground && pianoMode) setPianoMode(false);
 
+  if (flyingMode) {
+    flyingTimer = Math.max(0, flyingTimer - delta);
+    flightText.textContent = `${Math.ceil(flyingTimer)}s`;
+    if (flyingTimer <= 0) setFlyingMode(false);
+  }
+
   const turnSpeed = 0.045 * delta * 60;
   if (!underground && (keys["a"] || keys["ArrowLeft"])) turnDirection(turnSpeed);
   if (!underground && (keys["d"] || keys["ArrowRight"])) turnDirection(-turnSpeed);
@@ -1665,10 +1807,10 @@ function update(delta) {
 
   const wantsBoost = !pianoMode && (keys["w"] || keys["ArrowUp"]);
   const canBoost = wantsBoost && boost > 0.02;
-  const baseSpeed = 0.075 + Math.min(score, 18) * 0.002;
-  const moveRate = canBoost ? 0.142 : baseSpeed;
+  const baseSpeed = (flyingMode ? 0.112 : 0.075) + Math.min(score, 18) * 0.002;
+  const moveRate = canBoost ? (flyingMode ? 0.17 : 0.142) : baseSpeed;
   const speed = moveRate * delta * 60;
-  targetFov = underground ? 72 + Math.min(6, Math.max(0, (moveRate - 0.075) * 90)) : (canBoost ? 80 : 72);
+  targetFov = underground ? 72 + Math.min(6, Math.max(0, (moveRate - 0.075) * 90)) : (flyingMode ? (canBoost ? 86 : 80) : (canBoost ? 80 : 72));
   boost = Math.min(1, Math.max(0, boost + (canBoost ? -0.42 : 0.22) * delta));
   boostFill.style.width = `${Math.round(boost * 100)}%`;
   updateBoostWarning();
@@ -1686,6 +1828,13 @@ function update(delta) {
 
   const maxLength = 35 + score * 8;
   while (snake.length > maxLength) snake.pop();
+
+  if (!underground && !flyingMode && airplanePos && headPos.distanceTo(airplanePos) < 0.82) {
+    setFlyingMode(true);
+    burst(airplanePos, 0xffd166, { shockwave:true });
+    playTone(520, 0.14, "triangle", 0.055);
+    playTone(780, 0.18, "sine", 0.04);
+  }
 
   if (!underground && headPos.distanceTo(foodPos) < 0.78) {
     combo = Math.min(5, comboTimer > 0 ? combo + 1 : 1);
@@ -1732,7 +1881,25 @@ function update(delta) {
     messageText.textContent = "You found food in the dirt. Stay hidden, or press Space to jump back up.";
   }
 
-  if (powerUpPos && headPos.distanceTo(powerUpPos) < 0.82) {
+  if (flyingMode) for (let i = buildingMeshes.length - 1; i >= 0; i--) {
+    const building = buildingMeshes[i];
+    if (headPos.distanceTo(building.position) < 0.72) {
+      score += 2;
+      level = 1 + Math.floor(score / 8);
+      scoreText.textContent = score;
+      levelText.textContent = level;
+      pulseElement(scoreText, "hud-pop");
+      burst(building.position, 0xff8f4d, { shockwave:true });
+      playTone(130, 0.08, "sawtooth", 0.05);
+      playTone(390, 0.1, "triangle", 0.035);
+      showToast("Tower smash +2!");
+      scene.remove(building);
+      buildingMeshes.splice(i, 1);
+      createBuilding();
+    }
+  }
+
+  if (powerUpPos && !flyingMode && headPos.distanceTo(powerUpPos) < 0.82) {
     shield = Math.min(3, shield + 1);
     shieldText.textContent = shield;
     pulseElement(shieldText, "shield-pop");
@@ -1747,7 +1914,7 @@ function update(delta) {
     clearPowerUp();
   }
 
-  const collisionSafe = pianoMode || isInPianoSafeZone() || elapsedTime < safeUntil;
+  const collisionSafe = flyingMode || pianoMode || isInPianoSafeZone() || elapsedTime < safeUntil;
 
   if (!collisionSafe && lastMoveDistance > 0.0001) for (let i = 24; i < snake.length; i++) {
     if (headPos.distanceTo(snake[i]) < 0.24) {
@@ -1770,6 +1937,20 @@ function update(delta) {
     const shimmer = warning > 0.94 ? (warning - 0.94) / 0.06 : 0;
     mesh.material.emissiveIntensity = 0.65 + pulse * 1.15 + shimmer * 2.2;
     mesh.scale.copy(mesh.userData.baseScale).multiplyScalar(1 + pulse * 0.08 + shimmer * 0.12);
+  });
+  if (airplaneMesh) {
+    const pulse = (Math.sin(elapsedTime * 4.8) + 1) / 2;
+    const normal = airplanePos.clone().normalize();
+    airplaneMesh.position.copy(airplanePos).add(normal.multiplyScalar(Math.sin(elapsedTime * 2.2) * 0.12));
+    orientObjectOnSphere(airplaneMesh, airplaneMesh.position);
+    airplaneMesh.rotateY(Math.sin(elapsedTime * 3.5) * 0.08);
+    airplaneMesh.scale.setScalar(1 + pulse * 0.08);
+    if (airplaneMesh.userData.glow) airplaneMesh.userData.glow.intensity = 0.55 + pulse * 0.85;
+  }
+  buildingMeshes.forEach(mesh => {
+    const pulse = (Math.sin(elapsedTime * 3.1 + mesh.userData.phase) + 1) / 2;
+    mesh.material.emissiveIntensity = flyingMode ? 0.24 + pulse * 0.38 : 0.04;
+    mesh.scale.copy(mesh.userData.baseScale).multiplyScalar(1 + (flyingMode ? pulse * 0.035 : 0));
   });
   if (powerUpMesh) {
     const pulse = (Math.sin(elapsedTime * 4.2) + 1) / 2;
