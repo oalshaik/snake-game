@@ -158,6 +158,52 @@
       transition: width .12s linear;
     }
 
+    .hud-pop {
+      animation: score-pop .34s cubic-bezier(.2, 1.9, .4, 1);
+    }
+
+    .combo-pop {
+      animation: combo-pulse .42s ease-out;
+    }
+
+    .shield-pop {
+      animation: shield-flash .5s ease-out;
+    }
+
+    #boostMeter.boost-warning {
+      animation: low-boost-warning .62s ease-in-out infinite alternate;
+      border-color: rgba(255, 92, 122, .68);
+    }
+
+    #boostMeter.boost-warning #boostFill {
+      box-shadow: 0 0 30px rgba(255, 92, 122, .7);
+      filter: saturate(1.35) brightness(1.15);
+    }
+
+    @keyframes score-pop {
+      0% { transform: scale(1); text-shadow: 0 0 0 rgba(103, 255, 197, 0); }
+      45% { transform: scale(1.32); color: #ffffff; text-shadow: 0 0 18px rgba(103, 255, 197, .95); }
+      100% { transform: scale(1); text-shadow: 0 0 0 rgba(103, 255, 197, 0); }
+    }
+
+    @keyframes combo-pulse {
+      0% { transform: scale(1); text-shadow: 0 0 0 rgba(255, 209, 102, 0); }
+      38% { transform: scale(1.38) rotate(-3deg); color: var(--accent-2); text-shadow: 0 0 22px rgba(255, 209, 102, .95); }
+      70% { transform: scale(.95) rotate(2deg); }
+      100% { transform: scale(1) rotate(0); text-shadow: 0 0 0 rgba(255, 209, 102, 0); }
+    }
+
+    @keyframes shield-flash {
+      0% { transform: scale(1); text-shadow: 0 0 0 rgba(126, 215, 255, 0); }
+      30% { transform: scale(1.28); color: #ffffff; text-shadow: 0 0 24px rgba(126, 215, 255, 1); }
+      100% { transform: scale(1); text-shadow: 0 0 0 rgba(126, 215, 255, 0); }
+    }
+
+    @keyframes low-boost-warning {
+      0% { box-shadow: 0 10px 40px rgba(0, 0, 0, .28), 0 0 0 rgba(255, 92, 122, 0); }
+      100% { box-shadow: 0 10px 40px rgba(0, 0, 0, .28), 0 0 26px rgba(255, 92, 122, .72); }
+    }
+
     #toast {
       position: fixed;
       left: 50%;
@@ -325,6 +371,7 @@ const levelText = document.getElementById("level");
 const comboText = document.getElementById("combo");
 const shieldText = document.getElementById("shield");
 const messageText = document.getElementById("message");
+const boostMeter = document.getElementById("boostMeter");
 const boostFill = document.getElementById("boostFill");
 const finalScoreText = document.getElementById("finalScore");
 const finalBestText = document.getElementById("finalBest");
@@ -363,6 +410,7 @@ let shieldMesh;
 let audioCtx;
 let shake = 0;
 let toastTimer;
+let boostWarningActive = false;
 let lastTime = performance.now();
 let elapsedTime = 0;
 
@@ -463,6 +511,18 @@ function showToast(text) {
 function flashDamage() {
   damageFlash.classList.add("show");
   setTimeout(() => damageFlash.classList.remove("show"), 130);
+}
+
+function pulseElement(element, className) {
+  element.classList.remove(className);
+  void element.offsetWidth;
+  element.classList.add(className);
+}
+
+function updateBoostWarning() {
+  const shouldWarn = boost < 0.22;
+  boostWarningActive = shouldWarn;
+  boostMeter.classList.toggle("boost-warning", shouldWarn);
 }
 
 function createLandmarks() {
@@ -886,6 +946,7 @@ function resetGame() {
   shieldText.textContent = shield;
   messageText.textContent = "Eat glowing fruit to build combos. Blue relics grant shields.";
   boostFill.style.width = "100%";
+  updateBoostWarning();
   gameOver = false;
   gameOverBox.style.display = "none";
 
@@ -997,6 +1058,7 @@ function absorbCrash(reason) {
   if (shield <= 0) return false;
   shield--;
   shieldText.textContent = shield;
+  pulseElement(shieldText, "shield-pop");
   shake = 0.65;
   flashDamage();
   burst(headPos, 0x7ed7ff);
@@ -1181,6 +1243,7 @@ function update(delta) {
   if (comboTimer === 0 && combo !== 1) {
     combo = 1;
     comboText.textContent = "x1";
+    pulseElement(comboText, "combo-pop");
   }
 
   const wantsBoost = keys["w"] || keys["ArrowUp"];
@@ -1189,6 +1252,7 @@ function update(delta) {
   const speed = (canBoost ? 0.142 : baseSpeed) * delta * 60;
   boost = Math.min(1, Math.max(0, boost + (canBoost ? -0.42 : 0.22) * delta));
   boostFill.style.width = `${Math.round(boost * 100)}%`;
+  updateBoostWarning();
 
   if (underground) moveUnderground(speed);
   else moveOnSphere(speed);
@@ -1206,6 +1270,8 @@ function update(delta) {
     scoreText.textContent = score;
     levelText.textContent = level;
     comboText.textContent = `x${combo}`;
+    pulseElement(scoreText, "hud-pop");
+    pulseElement(comboText, "combo-pop");
     growSnake(7 + combo);
     burst(foodPos, combo > 2 ? 0xfff1a6 : 0xffd166);
     playTone(360 + combo * 90, 0.1, "triangle", 0.055);
@@ -1224,6 +1290,8 @@ function update(delta) {
     scoreText.textContent = score;
     levelText.textContent = level;
     comboText.textContent = `x${combo}`;
+    pulseElement(scoreText, "hud-pop");
+    pulseElement(comboText, "combo-pop");
     growSnake(6 + combo);
     burst(undergroundFoodPos, 0xffc15a);
     playTone(260 + combo * 70, 0.12, "triangle", 0.05);
@@ -1235,7 +1303,10 @@ function update(delta) {
   if (powerUpPos && headPos.distanceTo(powerUpPos) < 0.82) {
     shield = Math.min(3, shield + 1);
     shieldText.textContent = shield;
+    pulseElement(shieldText, "shield-pop");
     boost = 1;
+    boostFill.style.width = "100%";
+    updateBoostWarning();
     burst(powerUpPos, 0x7ed7ff);
     playTone(660, 0.08, "sine", 0.05);
     playTone(990, 0.16, "triangle", 0.045);
