@@ -362,6 +362,9 @@ let burrowTransition = null;
 let shieldMesh;
 let audioCtx;
 let shake = 0;
+let cameraKick = 0;
+let targetFov = 72;
+let cameraRoll = 0;
 let toastTimer;
 let lastTime = performance.now();
 let elapsedTime = 0;
@@ -953,6 +956,11 @@ function resetGame() {
   messageText.textContent = "Eat glowing fruit to build combos. Blue relics grant shields.";
   boostFill.style.width = "100%";
   gameOver = false;
+  cameraKick = 0;
+  targetFov = 72;
+  cameraRoll = 0;
+  camera.fov = targetFov;
+  camera.updateProjectionMatrix();
   gameOverBox.style.display = "none";
 
   snakeMeshes.forEach(m => scene.remove(m));
@@ -1064,6 +1072,7 @@ function absorbCrash(reason) {
   shield--;
   shieldText.textContent = shield;
   shake = 0.65;
+  cameraKick = Math.max(cameraKick, 0.55);
   flashDamage();
   burst(headPos, 0x7ed7ff);
   playTone(180, 0.09, "sawtooth", 0.05);
@@ -1084,12 +1093,19 @@ function endGame(reason) {
   finalBestText.textContent = best;
   gameOverBox.style.display = "grid";
   shake = 1;
+  cameraKick = Math.max(cameraKick, 0.9);
   flashDamage();
   burst(headPos, 0xff5c7a, { shockwave:true });
   playTone(120, 0.35, "sawtooth", 0.07);
 }
 
 function updateCamera(instant = false) {
+  const fovDelta = targetFov - camera.fov;
+  if (Math.abs(fovDelta) > 0.01) {
+    camera.fov += instant ? fovDelta : fovDelta * 0.12;
+    camera.updateProjectionMatrix();
+  }
+
   if (burrowTransition) {
     const progress = Math.min(burrowTransition.elapsed / burrowTransition.duration, 1);
     const cameraDepth = burrowTransition.direction === "down" ? progress : 1 - progress;
@@ -1109,6 +1125,10 @@ function updateCamera(instant = false) {
 
   if (underground) {
     const wantedPos = headPos.clone().add(new THREE.Vector3(0, 13, 0));
+    if (cameraKick > 0) {
+      wantedPos.y += cameraKick * 0.55;
+      cameraKick = Math.max(0, cameraKick - 0.035);
+    }
     if (shake > 0) {
       wantedPos.x += (Math.random() - 0.5) * shake * 0.18;
       wantedPos.z += (Math.random() - 0.5) * shake * 0.18;
@@ -1123,14 +1143,17 @@ function updateCamera(instant = false) {
 
   const up = headPos.clone().normalize();
 
+  const kickDistance = cameraKick * 0.72;
   const wantedPos = headPos.clone()
-    .add(forward.clone().multiplyScalar(-4.9))
+    .add(forward.clone().multiplyScalar(-4.9 - kickDistance))
     .add(up.clone().multiplyScalar(1.65));
 
   if (shake > 0) {
     wantedPos.add(randomPointOnSphere(1).multiplyScalar(shake * 0.12));
+    wantedPos.add(forward.clone().multiplyScalar(-shake * 0.22));
     shake = Math.max(0, shake - 0.04);
   }
+  cameraKick = Math.max(0, cameraKick - 0.035);
 
   if (instant) camera.position.copy(wantedPos);
   else camera.position.lerp(wantedPos, 0.22);
@@ -1139,8 +1162,12 @@ function updateCamera(instant = false) {
     .add(forward.clone().multiplyScalar(3.2))
     .add(up.clone().multiplyScalar(0.55));
 
+  const rollTarget = (keys["a"] || keys["ArrowLeft"] ? 0.055 : 0) + (keys["d"] || keys["ArrowRight"] ? -0.055 : 0);
+  cameraRoll += (rollTarget - cameraRoll) * (instant ? 1 : 0.12);
+
   camera.up.copy(up);
   camera.lookAt(lookTarget);
+  camera.rotateZ(cameraRoll);
 }
 
 function updateMinimap() {
@@ -1257,7 +1284,9 @@ function update(delta) {
   elapsedTime += delta;
 
   if (gameOver) {
+    targetFov = 72;
     updateParticles(delta);
+    updateCamera();
     return;
   }
 
@@ -1276,7 +1305,9 @@ function update(delta) {
   const wantsBoost = keys["w"] || keys["ArrowUp"];
   const canBoost = wantsBoost && boost > 0.02;
   const baseSpeed = 0.075 + Math.min(score, 18) * 0.002;
-  const speed = (canBoost ? 0.142 : baseSpeed) * delta * 60;
+  const moveRate = canBoost ? 0.142 : baseSpeed;
+  const speed = moveRate * delta * 60;
+  targetFov = underground ? 72 + Math.min(6, Math.max(0, (moveRate - 0.075) * 90)) : (canBoost ? 80 : 72);
   boost = Math.min(1, Math.max(0, boost + (canBoost ? -0.42 : 0.22) * delta));
   boostFill.style.width = `${Math.round(boost * 100)}%`;
 
@@ -1326,6 +1357,7 @@ function update(delta) {
     shield = Math.min(3, shield + 1);
     shieldText.textContent = shield;
     boost = 1;
+    cameraKick = Math.max(cameraKick, 0.45);
     burst(powerUpPos, 0x7ed7ff);
     playTone(660, 0.08, "sine", 0.05);
     playTone(990, 0.16, "triangle", 0.045);
