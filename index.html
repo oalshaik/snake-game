@@ -11,6 +11,7 @@
       --accent: #67ffc5;
       --accent-2: #ffd166;
       --danger: #ff5c7a;
+      --mud: #9b6a3c;
       --text-muted: #b7d4cc;
     }
 
@@ -250,7 +251,7 @@
 
 <div id="ui">
   <h1>Snake Planet Odyssey</h1>
-  <p class="subtitle">Collect comet fruit, dodge crystal meteors, and grow your orbiting serpent.</p>
+  <p class="subtitle">Collect comet fruit, dodge crystal meteors, then burrow into muddy tunnels to hide and forage.</p>
   <div class="stats">
     <div class="stat"><span>Score</span><strong id="score">0</strong></div>
     <div class="stat"><span>Best</span><strong id="best">0</strong></div>
@@ -261,6 +262,7 @@
   <div class="controls">
     <div><span class="key">A</span><span class="key">D</span>or arrows to carve across the planet</div>
     <div><span class="key">W</span>or <span class="key">↑</span>to boost while energy lasts</div>
+    <div><span class="key">S</span>or <span class="key">↓</span>burrow underground · <span class="key">Space</span>jump back up</div>
     <div><span class="key">Space</span>restart after a crash · blue relics grant shields</div>
   </div>
   <div id="message">Eat glowing fruit to spawn more hazards.</div>
@@ -315,6 +317,8 @@ scene.add(rimLight);
 
 const R = 8;
 const SURFACE = R + 0.35;
+const UNDERGROUND_Y = -11.5;
+const TUNNEL_LIMIT = 8.2;
 const scoreText = document.getElementById("score");
 const bestText = document.getElementById("best");
 const levelText = document.getElementById("level");
@@ -337,6 +341,7 @@ let combo = 1;
 let comboTimer = 0;
 let shield = 0;
 let boost = 1;
+let underground = false;
 let gameOver = false;
 let keys = {};
 let headPos;
@@ -350,6 +355,9 @@ let landmarkMeshes = [];
 let particles = [];
 let powerUpPos;
 let powerUpMesh;
+let undergroundFoodPos;
+let undergroundFoodMesh;
+let undergroundGroup;
 let shieldMesh;
 let audioCtx;
 let shake = 0;
@@ -387,6 +395,37 @@ for (let i = 0; i < 38; i++) {
   cloud.scale.set(8 + Math.random() * 13, 1, 2 + Math.random() * 4);
   cloud.lookAt(0, 0, 0);
   cloudGroup.add(cloud);
+}
+
+function createUndergroundWorld() {
+  undergroundGroup = new THREE.Group();
+  undergroundGroup.visible = false;
+  scene.add(undergroundGroup);
+
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(22, 22, 48, 48),
+    new THREE.MeshStandardMaterial({ color:0x7a4d28, roughness:1, metalness:0, emissive:0x1b0d04 })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = UNDERGROUND_Y - 0.18;
+  floor.receiveShadow = true;
+  undergroundGroup.add(floor);
+
+  const grid = new THREE.GridHelper(22, 22, 0x6f4524, 0x3c2515);
+  grid.position.y = UNDERGROUND_Y - 0.16;
+  grid.material.transparent = true;
+  grid.material.opacity = 0.28;
+  undergroundGroup.add(grid);
+
+  for (let i = 0; i < 90; i++) {
+    const pebble = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(0.035 + Math.random() * 0.09, 0),
+      new THREE.MeshStandardMaterial({ color:Math.random() > 0.55 ? 0x5a3922 : 0xb07a45, roughness:1 })
+    );
+    pebble.position.set((Math.random() - 0.5) * 20, UNDERGROUND_Y - 0.04, (Math.random() - 0.5) * 20);
+    pebble.scale.y = 0.45;
+    undergroundGroup.add(pebble);
+  }
 }
 
 const starGeometry = new THREE.BufferGeometry();
@@ -480,10 +519,40 @@ function randomPointOnSphere(radius = SURFACE) {
   ).normalize().multiplyScalar(radius);
 }
 
+function randomPointInTunnel() {
+  return new THREE.Vector3(
+    (Math.random() - 0.5) * TUNNEL_LIMIT * 1.8,
+    UNDERGROUND_Y,
+    (Math.random() - 0.5) * TUNNEL_LIMIT * 1.8
+  );
+}
+
+function clampTunnelPosition(pos) {
+  pos.x = THREE.MathUtils.clamp(pos.x, -TUNNEL_LIMIT, TUNNEL_LIMIT);
+  pos.z = THREE.MathUtils.clamp(pos.z, -TUNNEL_LIMIT, TUNNEL_LIMIT);
+  pos.y = UNDERGROUND_Y;
+}
+
 function turnDirection(amount) {
   const up = headPos.clone().normalize();
   forward.applyAxisAngle(up, amount);
   forward.projectOnPlane(up).normalize();
+}
+
+function moveUnderground(distance) {
+  const left = keys["a"] || keys["ArrowLeft"];
+  const right = keys["d"] || keys["ArrowRight"];
+  const up = keys["w"] || keys["ArrowUp"];
+  const down = keys["s"] || keys["ArrowDown"];
+  const move = new THREE.Vector3((right ? 1 : 0) - (left ? 1 : 0), 0, (down ? 1 : 0) - (up ? 1 : 0));
+
+  if (move.lengthSq() > 0) {
+    move.normalize();
+    forward.copy(move);
+  }
+
+  headPos.add(forward.clone().multiplyScalar(distance * 1.6));
+  clampTunnelPosition(headPos);
 }
 
 function moveOnSphere(distance) {
@@ -526,6 +595,65 @@ function createFood() {
   foodMesh.position.copy(foodPos);
   foodMesh.castShadow = true;
   scene.add(foodMesh);
+}
+
+function createUndergroundFood() {
+  if (undergroundFoodMesh) undergroundGroup.remove(undergroundFoodMesh);
+
+  undergroundFoodPos = randomPointInTunnel();
+  undergroundFoodMesh = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.34, 2),
+    new THREE.MeshStandardMaterial({ color:0xffc15a, emissive:0x5c2b08, roughness:0.42, metalness:0.05 })
+  );
+  undergroundFoodMesh.position.copy(undergroundFoodPos);
+  undergroundFoodMesh.castShadow = true;
+  undergroundGroup.add(undergroundFoodMesh);
+}
+
+function enterUnderground() {
+  if (underground || gameOver) return;
+  underground = true;
+  undergroundGroup.visible = true;
+  planet.visible = false;
+  atmosphere.visible = false;
+  cloudGroup.visible = false;
+  obstacleMeshes.forEach(mesh => mesh.visible = false);
+  landmarkMeshes.forEach(mesh => mesh.visible = false);
+  if (foodMesh) foodMesh.visible = false;
+  if (powerUpMesh) powerUpMesh.visible = false;
+  if (!undergroundFoodMesh) createUndergroundFood();
+
+  const old = headPos.clone();
+  headPos.set(THREE.MathUtils.clamp(old.x, -TUNNEL_LIMIT, TUNNEL_LIMIT), UNDERGROUND_Y, THREE.MathUtils.clamp(old.z, -TUNNEL_LIMIT, TUNNEL_LIMIT));
+  forward.set(1, 0, 0);
+  snake = snake.map((part, i) => new THREE.Vector3(
+    THREE.MathUtils.clamp(headPos.x - i * 0.18, -TUNNEL_LIMIT, TUNNEL_LIMIT),
+    UNDERGROUND_Y,
+    headPos.z
+  ));
+  showToast("Burrowed underground");
+  messageText.textContent = "Mud tunnel mode: traps are above you. Find roots and press Space to jump back to the sphere.";
+}
+
+function exitUnderground() {
+  if (!underground) return;
+  underground = false;
+  undergroundGroup.visible = false;
+  planet.visible = true;
+  atmosphere.visible = true;
+  cloudGroup.visible = true;
+  obstacleMeshes.forEach(mesh => mesh.visible = true);
+  landmarkMeshes.forEach(mesh => mesh.visible = true);
+  if (foodMesh) foodMesh.visible = true;
+  if (powerUpMesh) powerUpMesh.visible = true;
+
+  const launch = new THREE.Vector3(headPos.x, R, headPos.z).normalize();
+  headPos.copy(launch.multiplyScalar(SURFACE));
+  forward.set(1, 0, 0).projectOnPlane(headPos.clone().normalize()).normalize();
+  snake = snake.map((part, i) => headPos.clone().add(forward.clone().multiplyScalar(-i * 0.12)).normalize().multiplyScalar(SURFACE));
+  burst(headPos, 0xb07a45);
+  showToast("Jumped back up!");
+  messageText.textContent = "Back on the planet. Crystal traps can hit you again.";
 }
 
 function createPowerUp() {
@@ -605,6 +733,7 @@ function resetGame() {
   comboTimer = 0;
   shield = 0;
   boost = 1;
+  underground = false;
   foodPos = null;
   scoreText.textContent = score;
   levelText.textContent = level;
@@ -621,6 +750,13 @@ function resetGame() {
   particles.forEach(p => scene.remove(p));
   particles = [];
   clearPowerUp();
+  if (undergroundGroup) undergroundGroup.visible = false;
+  planet.visible = true;
+  atmosphere.visible = true;
+  cloudGroup.visible = true;
+  obstacleMeshes.forEach(mesh => mesh.visible = true);
+  landmarkMeshes.forEach(mesh => mesh.visible = true);
+  if (!undergroundFoodMesh && undergroundGroup) createUndergroundFood();
 
   headPos = new THREE.Vector3(0, SURFACE, 0);
   forward = new THREE.Vector3(1, 0, 0);
@@ -659,12 +795,12 @@ function updateSnakeVisuals() {
   for (let i = 0; i < snake.length; i++) {
     snakeMeshes[i].position.copy(snake[i]);
 
-    const up = snake[i].clone().normalize();
+    const up = underground ? new THREE.Vector3(0, 1, 0) : snake[i].clone().normalize();
     snakeMeshes[i].quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), up);
 
     const hue = 0.39 + Math.sin((i * 0.18) + performance.now() * 0.003) * 0.035;
-    snakeMeshes[i].material.color.setHSL(i === 0 ? 0.43 : hue, 1, i === 0 ? 0.92 : 0.52);
-    snakeMeshes[i].material.emissive.setHSL(0.42, 1, i === 0 ? 0.12 : 0.055);
+    snakeMeshes[i].material.color.setHSL(underground ? 0.28 : (i === 0 ? 0.43 : hue), underground ? 0.85 : 1, i === 0 ? 0.82 : 0.46);
+    snakeMeshes[i].material.emissive.setHSL(underground ? 0.08 : 0.42, 1, i === 0 ? 0.12 : 0.055);
     snakeMeshes[i].scale.setScalar(i === 0 ? 1.28 : 1 - Math.min(i / snake.length, 1) * 0.18);
   }
 }
@@ -710,6 +846,20 @@ function endGame(reason) {
 }
 
 function updateCamera(instant = false) {
+  if (underground) {
+    const wantedPos = headPos.clone().add(new THREE.Vector3(0, 13, 0));
+    if (shake > 0) {
+      wantedPos.x += (Math.random() - 0.5) * shake * 0.18;
+      wantedPos.z += (Math.random() - 0.5) * shake * 0.18;
+      shake = Math.max(0, shake - 0.04);
+    }
+    if (instant) camera.position.copy(wantedPos);
+    else camera.position.lerp(wantedPos, 0.2);
+    camera.up.set(0, 0, -1);
+    camera.lookAt(headPos);
+    return;
+  }
+
   const up = headPos.clone().normalize();
 
   const wantedPos = headPos.clone()
@@ -749,6 +899,15 @@ function updateMinimap() {
   mapCtx.lineWidth = 2;
   mapCtx.stroke();
 
+  if (underground) {
+    mapCtx.fillStyle = "rgba(60,37,21,.72)";
+    mapCtx.fill();
+    mapCtx.fillStyle = "#ffc15a";
+    mapCtx.font = "700 11px system-ui";
+    mapCtx.textAlign = "center";
+    mapCtx.fillText("MUD TUNNELS", cx, 23);
+  }
+
   function project(pos) {
     return {
       x: cx + (pos.x / R) * radius,
@@ -786,6 +945,13 @@ function updateMinimap() {
   mapCtx.arc(f.x, f.y, 5, 0, Math.PI * 2);
   mapCtx.fillStyle = f.hidden ? "rgba(255,65,104,.35)" : "#ff4168";
   mapCtx.fill();
+
+  if (underground && undergroundFoodPos) {
+    mapCtx.beginPath();
+    mapCtx.arc(cx + (undergroundFoodPos.x / TUNNEL_LIMIT) * radius, cy + (undergroundFoodPos.z / TUNNEL_LIMIT) * radius, 5, 0, Math.PI * 2);
+    mapCtx.fillStyle = "#ffc15a";
+    mapCtx.fill();
+  }
 }
 
 function updateParticles(delta) {
@@ -809,8 +975,8 @@ function update(delta) {
   }
 
   const turnSpeed = 0.045 * delta * 60;
-  if (keys["a"] || keys["ArrowLeft"]) turnDirection(turnSpeed);
-  if (keys["d"] || keys["ArrowRight"]) turnDirection(-turnSpeed);
+  if (!underground && (keys["a"] || keys["ArrowLeft"])) turnDirection(turnSpeed);
+  if (!underground && (keys["d"] || keys["ArrowRight"])) turnDirection(-turnSpeed);
 
   comboTimer = Math.max(0, comboTimer - delta);
   if (comboTimer === 0 && combo !== 1) {
@@ -825,14 +991,15 @@ function update(delta) {
   boost = Math.min(1, Math.max(0, boost + (canBoost ? -0.42 : 0.22) * delta));
   boostFill.style.width = `${Math.round(boost * 100)}%`;
 
-  moveOnSphere(speed);
+  if (underground) moveUnderground(speed);
+  else moveOnSphere(speed);
 
   snake.unshift(headPos.clone());
 
   const maxLength = 35 + score * 8;
   while (snake.length > maxLength) snake.pop();
 
-  if (headPos.distanceTo(foodPos) < 0.78) {
+  if (!underground && headPos.distanceTo(foodPos) < 0.78) {
     combo = Math.min(5, comboTimer > 0 ? combo + 1 : 1);
     comboTimer = 4.2;
     score += combo;
@@ -848,6 +1015,22 @@ function update(delta) {
     if (score % 3 === 0 && obstacleMeshes.length < 20) createObstacle();
     if (score > 0 && score % 10 === 0 && !powerUpMesh) createPowerUp();
     messageText.textContent = combo > 3 ? "Meteoric combo! Keep the streak alive." : "Nice catch! Keep carving the curve.";
+  }
+
+  if (underground && undergroundFoodPos && headPos.distanceTo(undergroundFoodPos) < 0.72) {
+    combo = Math.min(5, comboTimer > 0 ? combo + 1 : 1);
+    comboTimer = 4.2;
+    score += combo;
+    level = 1 + Math.floor(score / 8);
+    scoreText.textContent = score;
+    levelText.textContent = level;
+    comboText.textContent = `x${combo}`;
+    growSnake(6 + combo);
+    burst(undergroundFoodPos, 0xffc15a);
+    playTone(260 + combo * 70, 0.12, "triangle", 0.05);
+    showToast(combo > 1 ? `Mud combo x${combo}!` : "Root snack!");
+    createUndergroundFood();
+    messageText.textContent = "You found food in the dirt. Stay hidden, or press Space to jump back up.";
   }
 
   if (powerUpPos && headPos.distanceTo(powerUpPos) < 0.82) {
@@ -869,7 +1052,7 @@ function update(delta) {
     }
   }
 
-  for (const obstacle of obstacleMeshes) {
+  if (!underground) for (const obstacle of obstacleMeshes) {
     if (headPos.distanceTo(obstacle.position) < 0.62) {
       if (!absorbCrash("A crystal meteor shattered the orbit.")) endGame("A crystal meteor shattered the orbit.");
       return;
@@ -890,6 +1073,10 @@ function update(delta) {
   }
   foodMesh.rotation.y += 0.03 * delta * 60;
   foodMesh.rotation.x += 0.018 * delta * 60;
+  if (undergroundFoodMesh) {
+    undergroundFoodMesh.rotation.y += 0.035 * delta * 60;
+    undergroundFoodMesh.scale.setScalar(1 + Math.sin(performance.now() * 0.006) * 0.13);
+  }
   updateParticles(delta);
   updateSnakeVisuals();
   updateCamera();
@@ -916,12 +1103,18 @@ function animate(now = performance.now()) {
 document.addEventListener("keydown", e => {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (audioCtx.state === "suspended") audioCtx.resume();
-  keys[e.key] = true;
-  if (e.code === "Space") resetGame();
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  keys[key] = true;
+  if ((key === "s" || key === "ArrowDown") && !underground && !gameOver) enterUnderground();
+  if (e.code === "Space") {
+    if (gameOver) resetGame();
+    else if (underground) exitUnderground();
+  }
 });
 
 document.addEventListener("keyup", e => {
-  keys[e.key] = false;
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  keys[key] = false;
 });
 
 window.addEventListener("resize", () => {
@@ -930,6 +1123,7 @@ window.addEventListener("resize", () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
+createUndergroundWorld();
 createShieldVisual();
 resetGame();
 animate();
