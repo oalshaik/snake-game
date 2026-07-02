@@ -309,6 +309,7 @@
     <div><span class="key">A</span><span class="key">D</span>or arrows to carve across the planet</div>
     <div><span class="key">W</span>or <span class="key">↑</span>to boost while energy lasts</div>
     <div><span class="key">S</span>or <span class="key">↓</span>burrow underground · <span class="key">Space</span>jump back up</div>
+    <div><span class="key">E</span>leave underground piano · <span class="key">A</span>-<span class="key">K</span>keys become piano notes</div>
     <div><span class="key">Space</span>restart after a crash · blue relics grant shields</div>
   </div>
   <div id="message">Eat glowing fruit to spawn more hazards.</div>
@@ -380,6 +381,16 @@ const damageFlash = document.getElementById("damageFlash");
 const gameOverBox = document.getElementById("gameOver");
 const mapCanvas = document.getElementById("minimap");
 const mapCtx = mapCanvas.getContext("2d");
+const pianoKeyMap = {
+  a: { note:"C4", frequency:261.63, color:0xfff4d6 },
+  s: { note:"D4", frequency:293.66, color:0xffd166 },
+  d: { note:"E4", frequency:329.63, color:0xffa35c },
+  f: { note:"F4", frequency:349.23, color:0x67ffc5 },
+  g: { note:"G4", frequency:392.00, color:0x7ed7ff },
+  h: { note:"A4", frequency:440.00, color:0xb18cff },
+  j: { note:"B4", frequency:493.88, color:0xff8fd4 },
+  k: { note:"C5", frequency:523.25, color:0xffffff }
+};
 
 let score = 0;
 let best = Number(localStorage.getItem("snakePlanetBest") || 0);
@@ -405,6 +416,11 @@ let powerUpMesh;
 let undergroundFoodPos;
 let undergroundFoodMesh;
 let undergroundGroup;
+let pianoMesh;
+let pianoPos;
+let pianoMode = false;
+let pianoCooldownUntil = 0;
+let activePianoKeys = {};
 let undergroundDust = [];
 let undergroundPebbles = [];
 let burrowTransition = null;
@@ -522,6 +538,11 @@ function createUndergroundWorld() {
     undergroundGroup.add(dust);
     undergroundDust.push(dust);
   }
+  pianoPos = new THREE.Vector3(3.8, UNDERGROUND_Y + 0.08, -3.4);
+  pianoMesh = createUndergroundPiano();
+  pianoMesh.position.copy(pianoPos);
+  undergroundGroup.add(pianoMesh);
+
   undergroundGroup.userData.dust = undergroundDust;
   undergroundGroup.userData.pebbles = undergroundPebbles;
 }
@@ -621,6 +642,114 @@ function makeSnakePart(isHead) {
   return mesh;
 }
 
+function createUndergroundPiano() {
+  const group = new THREE.Group();
+
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(2.65, 0.36, 1.05),
+    new THREE.MeshStandardMaterial({ color:0x1b1110, roughness:0.62, metalness:0.18, emissive:0x090403 })
+  );
+  body.position.y = 0.26;
+  body.castShadow = true;
+  group.add(body);
+
+  const lid = new THREE.Mesh(
+    new THREE.BoxGeometry(2.82, 0.08, 1.16),
+    new THREE.MeshStandardMaterial({ color:0x38201c, roughness:0.48, metalness:0.22, emissive:0x120705 })
+  );
+  lid.position.set(0, 0.52, -0.03);
+  lid.rotation.x = -0.18;
+  lid.castShadow = true;
+  group.add(lid);
+
+  const keyDeck = new THREE.Group();
+  keyDeck.position.set(-0.98, 0.5, 0.43);
+  Object.entries(pianoKeyMap).forEach(([keyName, note], index) => {
+    const keyMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.22, 0.055, 0.46),
+      new THREE.MeshStandardMaterial({ color:0xf7f2df, roughness:0.34, metalness:0.04, emissive:0x000000 })
+    );
+    keyMesh.position.set(index * 0.28, 0, 0);
+    keyMesh.userData.keyName = keyName;
+    keyMesh.userData.baseY = keyMesh.position.y;
+    keyDeck.add(keyMesh);
+
+    if (![2, 6].includes(index)) {
+      const blackKey = new THREE.Mesh(
+        new THREE.BoxGeometry(0.13, 0.08, 0.27),
+        new THREE.MeshStandardMaterial({ color:0x050505, roughness:0.4, metalness:0.25 })
+      );
+      blackKey.position.set(index * 0.28 + 0.14, 0.05, -0.08);
+      keyDeck.add(blackKey);
+    }
+  });
+  group.add(keyDeck);
+  group.userData.keyDeck = keyDeck;
+
+  for (let i = 0; i < 3; i++) {
+    const leg = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.045, 0.06, 0.52, 8),
+      new THREE.MeshStandardMaterial({ color:0x120908, roughness:0.72 })
+    );
+    leg.position.set(-0.9 + i * 0.9, -0.06, i === 1 ? -0.36 : 0.24);
+    leg.castShadow = true;
+    group.add(leg);
+  }
+
+  const glow = new THREE.PointLight(0xffd166, 0.95, 4.2, 2);
+  glow.position.set(0, 0.8, 0.3);
+  group.add(glow);
+  group.userData.glow = glow;
+
+  return group;
+}
+
+function setPianoMode(enabled) {
+  if (pianoMode === enabled) return;
+  pianoMode = enabled;
+  activePianoKeys = {};
+  if (enabled) {
+    showToast("Piano mode!");
+    messageText.textContent = "Playable piano: press A S D F G H J K to play notes, then E to leave the piano.";
+    playPianoNote("a");
+  } else {
+    showToast("Back to digging");
+    messageText.textContent = "Mud tunnel mode: find roots, visit the piano, or press Space to jump back to the sphere.";
+    pianoCooldownUntil = elapsedTime + 1.25;
+  }
+}
+
+function playPianoNote(keyName) {
+  const note = pianoKeyMap[keyName];
+  if (!note) return;
+  playTone(note.frequency, 0.42, "triangle", 0.08);
+  playTone(note.frequency * 2, 0.24, "sine", 0.025);
+  activePianoKeys[keyName] = 0.22;
+  if (pianoMesh) {
+    const sparklePos = pianoMesh.position.clone().add(new THREE.Vector3((Object.keys(pianoKeyMap).indexOf(keyName) - 3.5) * 0.28, 0.74, 0.52));
+    burst(sparklePos, note.color, { underground:true });
+  }
+}
+
+function updatePiano(delta) {
+  if (!pianoMesh) return;
+  const pulse = (Math.sin(elapsedTime * 3.8) + 1) / 2;
+  pianoMesh.rotation.y = Math.sin(elapsedTime * 0.9) * 0.04;
+  if (pianoMesh.userData.glow) pianoMesh.userData.glow.intensity = 0.55 + pulse * 0.75 + (pianoMode ? 0.9 : 0);
+
+  if (pianoMesh.userData.keyDeck) {
+    pianoMesh.userData.keyDeck.children.forEach(keyMesh => {
+      const keyName = keyMesh.userData.keyName;
+      if (!keyName) return;
+      activePianoKeys[keyName] = Math.max(0, (activePianoKeys[keyName] || 0) - delta);
+      const active = activePianoKeys[keyName] > 0;
+      keyMesh.position.y = keyMesh.userData.baseY - (active ? 0.045 : 0);
+      keyMesh.material.emissive.setHex(active ? pianoKeyMap[keyName].color : 0x000000);
+      keyMesh.material.emissiveIntensity = active ? 0.8 : 0;
+    });
+  }
+}
+
 function randomPointOnSphere(radius = SURFACE) {
   return new THREE.Vector3(
     Math.random() - 0.5,
@@ -650,6 +779,7 @@ function turnDirection(amount) {
 }
 
 function moveUnderground(distance) {
+  if (pianoMode) return;
   const left = keys["a"] || keys["ArrowLeft"];
   const right = keys["d"] || keys["ArrowRight"];
   const up = keys["w"] || keys["ArrowUp"];
@@ -857,9 +987,10 @@ function finishBurrowTransition() {
     planet.visible = false;
     atmosphere.visible = false;
     cloudGroup.visible = false;
-    messageText.textContent = "Mud tunnel mode: traps are above you. Find roots and press Space to jump back to the sphere.";
+    messageText.textContent = "Mud tunnel mode: traps are above you. Find roots, or approach the piano to start playing.";
   } else {
     underground = false;
+    setPianoMode(false);
     undergroundGroup.visible = false;
     planet.visible = true;
     atmosphere.visible = true;
@@ -912,6 +1043,7 @@ function updateBurrowTransition(delta) {
   }
 
   updateUndergroundAmbience(delta);
+  updatePiano(delta);
   updateParticles(delta);
   updateSnakeVisuals();
   updateCamera();
@@ -1388,6 +1520,17 @@ function updateMinimap() {
   mapCtx.fillStyle = f.hidden ? "rgba(255,65,104,.35)" : "#ff4168";
   mapCtx.fill();
 
+  if (underground && pianoPos) {
+    mapCtx.beginPath();
+    mapCtx.arc(cx + (pianoPos.x / TUNNEL_LIMIT) * radius, cy + (pianoPos.z / TUNNEL_LIMIT) * radius, 6, 0, Math.PI * 2);
+    mapCtx.fillStyle = pianoMode ? "#ffffff" : "#ffd166";
+    mapCtx.fill();
+    mapCtx.fillStyle = "#20140d";
+    mapCtx.font = "700 9px system-ui";
+    mapCtx.textAlign = "center";
+    mapCtx.fillText("♪", cx + (pianoPos.x / TUNNEL_LIMIT) * radius, cy + (pianoPos.z / TUNNEL_LIMIT) * radius + 3);
+  }
+
   if (underground && undergroundFoodPos) {
     mapCtx.beginPath();
     mapCtx.arc(cx + (undergroundFoodPos.x / TUNNEL_LIMIT) * radius, cy + (undergroundFoodPos.z / TUNNEL_LIMIT) * radius, 5, 0, Math.PI * 2);
@@ -1465,6 +1608,7 @@ function update(delta) {
   }
 
   if (updateBurrowTransition(delta)) return;
+  if (!underground && pianoMode) setPianoMode(false);
 
   const turnSpeed = 0.045 * delta * 60;
   if (!underground && (keys["a"] || keys["ArrowLeft"])) turnDirection(turnSpeed);
@@ -1513,6 +1657,11 @@ function update(delta) {
     if (score % 3 === 0 && obstacleMeshes.length < 20) createObstacle();
     if (score > 0 && score % 10 === 0 && !powerUpMesh) createPowerUp();
     messageText.textContent = combo > 3 ? "Meteoric combo! Keep the streak alive." : "Nice catch! Keep carving the curve.";
+  }
+
+  if (underground && pianoMesh && headPos.distanceTo(pianoPos) < 1.35) {
+    if (!pianoMode && elapsedTime >= pianoCooldownUntil) setPianoMode(true);
+    else if (!pianoMode) messageText.textContent = "You found the tunnel piano. Move away, or press E when you return to play again.";
   }
 
   if (underground && undergroundFoodPos && headPos.distanceTo(undergroundFoodPos) < 0.72) {
@@ -1608,6 +1757,7 @@ function update(delta) {
     undergroundFoodMesh.scale.setScalar(1 + Math.sin(performance.now() * 0.006) * 0.13);
   }
   updateUndergroundAmbience(delta);
+  updatePiano(delta);
   updateParticles(delta);
   updateSnakeVisuals();
   updateCamera();
@@ -1636,6 +1786,16 @@ document.addEventListener("keydown", e => {
   if (audioCtx.state === "suspended") audioCtx.resume();
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   keys[key] = true;
+  if (pianoMode && pianoKeyMap[key]) {
+    e.preventDefault();
+    playPianoNote(key);
+    return;
+  }
+  if (key === "e" && underground && !gameOver && pianoPos && (pianoMode || headPos.distanceTo(pianoPos) < 1.65)) {
+    e.preventDefault();
+    setPianoMode(!pianoMode);
+    return;
+  }
   if ((key === "s" || key === "ArrowDown") && !underground && !gameOver) enterUnderground();
   if (e.code === "Space") {
     if (gameOver) resetGame();
