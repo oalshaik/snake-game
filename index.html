@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Snake Planet POV</title>
+  <style>
+    body { margin:0; overflow:hidden; background:#020806; font-family:Arial; color:white; }
+    #ui {
+      position:fixed; top:20px; left:20px; z-index:10;
+      background:rgba(0,0,0,.45); padding:15px 20px; border-radius:16px;
+    }
+    #minimap {
+      position:fixed; top:20px; right:20px; z-index:10;
+      width:170px; height:170px;
+      background:rgba(0,0,0,.5);
+      border:2px solid #00ff88;
+      border-radius:50%;
+    }
+    #gameOver {
+      display:none; position:fixed; inset:0; place-items:center;
+      background:rgba(0,0,0,.55); z-index:20; text-align:center;
+    }
+  </style>
+</head>
+<body>
+
+<div id="ui">
+  <h2>Snake Planet POV</h2>
+  <p>A / D = Turn</p>
+  <p>W = Speed up</p>
+  <p>Space = Restart</p>
+  <h3>Score: <span id="score">0</span></h3>
+</div>
+
+<canvas id="minimap" width="170" height="170"></canvas>
+
+<div id="gameOver">
+  <div>
+    <h1>Game Over</h1>
+    <p>Press Space to Restart</p>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+<script>
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x06120d);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0x88ffaa, 0.75));
+
+const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+sun.position.set(5, 8, 5);
+scene.add(sun);
+
+const R = 8;
+const scoreText = document.getElementById("score");
+const gameOverBox = document.getElementById("gameOver");
+const mapCanvas = document.getElementById("minimap");
+const mapCtx = mapCanvas.getContext("2d");
+
+let score = 0;
+let gameOver = false;
+let keys = {};
+let headPos;
+let forward;
+let snake = [];
+let snakeMeshes = [];
+let foodPos;
+let foodMesh;
+
+const planet = new THREE.Mesh(
+  new THREE.SphereGeometry(R, 96, 96),
+  new THREE.MeshStandardMaterial({ color:0x1f6b3d, roughness:0.9 })
+);
+scene.add(planet);
+
+function makeSnakePart(isHead) {
+  return new THREE.Mesh(
+    new THREE.SphereGeometry(isHead ? 0.34 : 0.27, 24, 24),
+    new THREE.MeshStandardMaterial({
+      color:isHead ? 0xb6ffd3 : 0x00ff77,
+      roughness:0.35,
+      metalness:0.2
+    })
+  );
+}
+
+function randomPointOnSphere() {
+  return new THREE.Vector3(
+    Math.random() - 0.5,
+    Math.random() - 0.5,
+    Math.random() - 0.5
+  ).normalize().multiplyScalar(R + 0.35);
+}
+
+function turnDirection(amount) {
+  const up = headPos.clone().normalize();
+  forward.applyAxisAngle(up, amount);
+  forward.projectOnPlane(up).normalize();
+}
+
+function moveOnSphere(distance) {
+  const up = headPos.clone().normalize();
+  forward.projectOnPlane(up).normalize();
+
+  const axis = new THREE.Vector3().crossVectors(up, forward).normalize();
+  const angle = distance / R;
+
+  headPos.applyAxisAngle(axis, angle);
+  headPos.normalize().multiplyScalar(R + 0.35);
+
+  const newUp = headPos.clone().normalize();
+  forward.applyAxisAngle(axis, angle);
+  forward.projectOnPlane(newUp).normalize();
+}
+
+function createFood() {
+  if (foodMesh) scene.remove(foodMesh);
+
+  foodPos = randomPointOnSphere();
+
+  foodMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.38, 32, 32),
+    new THREE.MeshStandardMaterial({ color:0xff3333, emissive:0x330000 })
+  );
+
+  foodMesh.position.copy(foodPos);
+  scene.add(foodMesh);
+}
+
+function resetGame() {
+  score = 0;
+  scoreText.textContent = score;
+  gameOver = false;
+  gameOverBox.style.display = "none";
+
+  snakeMeshes.forEach(m => scene.remove(m));
+  snakeMeshes = [];
+  snake = [];
+
+  headPos = new THREE.Vector3(0, R + 0.35, 0);
+  forward = new THREE.Vector3(1, 0, 0);
+
+  for (let i = 0; i < 35; i++) {
+    const p = headPos.clone();
+    p.x -= i * 0.12;
+    p.normalize().multiplyScalar(R + 0.35);
+    snake.push(p);
+  }
+
+  syncMeshes();
+  createFood();
+  updateCamera(true);
+  updateMinimap();
+}
+
+function syncMeshes() {
+  while (snakeMeshes.length < snake.length) {
+    const mesh = makeSnakePart(false);
+    scene.add(mesh);
+    snakeMeshes.push(mesh);
+  }
+
+  while (snakeMeshes.length > snake.length) {
+    const mesh = snakeMeshes.pop();
+    scene.remove(mesh);
+  }
+}
+
+function updateSnakeVisuals() {
+  syncMeshes();
+
+  for (let i = 0; i < snake.length; i++) {
+    snakeMeshes[i].position.copy(snake[i]);
+
+    const up = snake[i].clone().normalize();
+    snakeMeshes[i].quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), up);
+
+    snakeMeshes[i].material.color.set(i === 0 ? 0xb6ffd3 : 0x00ff77);
+    snakeMeshes[i].scale.setScalar(i === 0 ? 1.25 : 1);
+  }
+}
+
+function growSnake(amount) {
+  const tail = snake[snake.length - 1].clone();
+
+  for (let i = 0; i < amount; i++) {
+    snake.push(tail.clone());
+  }
+
+  syncMeshes();
+}
+
+function endGame() {
+  gameOver = true;
+  gameOverBox.style.display = "grid";
+}
+
+function updateCamera(instant = false) {
+  const up = headPos.clone().normalize();
+
+  const wantedPos = headPos.clone()
+    .add(forward.clone().multiplyScalar(-4.6))
+    .add(up.clone().multiplyScalar(1.5));
+
+  if (instant) camera.position.copy(wantedPos);
+  else camera.position.lerp(wantedPos, 0.22);
+
+  const lookTarget = headPos.clone()
+    .add(forward.clone().multiplyScalar(3))
+    .add(up.clone().multiplyScalar(0.6));
+
+  camera.up.copy(up);
+  camera.lookAt(lookTarget);
+}
+
+function updateMinimap() {
+  const cx = 85, cy = 85, radius = 72;
+  mapCtx.clearRect(0, 0, 170, 170);
+
+  mapCtx.beginPath();
+  mapCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+  mapCtx.fillStyle = "rgba(20,90,55,.85)";
+  mapCtx.fill();
+
+  function project(pos) {
+    return {
+      x: cx + (pos.x / R) * radius,
+      y: cy + (pos.z / R) * radius
+    };
+  }
+
+  snake.forEach((s, i) => {
+    const p = project(s);
+    mapCtx.beginPath();
+    mapCtx.arc(p.x, p.y, i === 0 ? 6 : 2, 0, Math.PI * 2);
+    mapCtx.fillStyle = i === 0 ? "white" : "#00ff77";
+    mapCtx.fill();
+  });
+
+  const f = project(foodPos);
+  mapCtx.beginPath();
+  mapCtx.arc(f.x, f.y, 5, 0, Math.PI * 2);
+  mapCtx.fillStyle = "red";
+  mapCtx.fill();
+}
+
+function update() {
+  if (gameOver) return;
+
+  if (keys["a"] || keys["ArrowLeft"]) turnDirection(0.045);
+  if (keys["d"] || keys["ArrowRight"]) turnDirection(-0.045);
+
+  let speed = keys["w"] || keys["ArrowUp"] ? 0.13 : 0.075;
+
+  moveOnSphere(speed);
+
+  snake.unshift(headPos.clone());
+
+  const maxLength = 35 + score * 8;
+  while (snake.length > maxLength) snake.pop();
+
+  if (headPos.distanceTo(foodPos) < 0.75) {
+    score++;
+    scoreText.textContent = score;
+    growSnake(8);
+    createFood();
+  }
+
+  for (let i = 20; i < snake.length; i++) {
+    if (headPos.distanceTo(snake[i]) < 0.28) {
+      endGame();
+      return;
+    }
+  }
+
+  updateSnakeVisuals();
+  updateCamera();
+  updateMinimap();
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  update();
+
+  if (foodMesh) {
+    foodMesh.scale.setScalar(1 + Math.sin(Date.now() * 0.006) * 0.12);
+  }
+
+  renderer.render(scene, camera);
+}
+
+document.addEventListener("keydown", e => {
+  keys[e.key] = true;
+  if (e.code === "Space") resetGame();
+});
+
+document.addEventListener("keyup", e => {
+  keys[e.key] = false;
+});
+
+window.addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+resetGame();
+animate();
+</script>
+
+</body>
+</html>
