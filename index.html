@@ -364,6 +364,7 @@ let audioCtx;
 let shake = 0;
 let toastTimer;
 let lastTime = performance.now();
+let elapsedTime = 0;
 
 bestText.textContent = best;
 
@@ -588,10 +589,30 @@ function createFood() {
   }
   foodPos = nextFoodPos || randomPointOnSphere();
 
+  const foodColor = 0xff4168;
   foodMesh = new THREE.Mesh(
     new THREE.IcosahedronGeometry(0.42, 2),
-    new THREE.MeshStandardMaterial({ color:0xff4168, emissive:0x661023, roughness:0.25, metalness:0.12 })
+    new THREE.MeshStandardMaterial({ color:foodColor, emissive:0x661023, roughness:0.25, metalness:0.12 })
   );
+
+  const aura = new THREE.Mesh(
+    new THREE.SphereGeometry(0.62, 24, 24),
+    new THREE.MeshBasicMaterial({
+      color:0xff7aa0,
+      transparent:true,
+      opacity:0.24,
+      depthWrite:false,
+      blending:THREE.AdditiveBlending
+    })
+  );
+  aura.userData.baseScale = 1;
+  foodMesh.add(aura);
+  foodMesh.userData.aura = aura;
+
+  const glow = new THREE.PointLight(foodColor, 0.8, 3.4, 2);
+  glow.position.set(0, 0, 0);
+  foodMesh.add(glow);
+  foodMesh.userData.glow = glow;
 
   foodMesh.position.copy(foodPos);
   foodMesh.castShadow = true;
@@ -767,10 +788,30 @@ function createPowerUp() {
     }
   }
   powerUpPos = nextPowerUpPos || randomPointOnSphere();
+  const powerColor = 0x7ed7ff;
   powerUpMesh = new THREE.Mesh(
     new THREE.TorusKnotGeometry(0.26, 0.075, 72, 10),
-    new THREE.MeshStandardMaterial({ color:0x7ed7ff, emissive:0x0b4f76, roughness:0.18, metalness:0.5 })
+    new THREE.MeshStandardMaterial({ color:powerColor, emissive:0x0b4f76, roughness:0.18, metalness:0.5 })
   );
+
+  const aura = new THREE.Mesh(
+    new THREE.SphereGeometry(0.52, 24, 24),
+    new THREE.MeshBasicMaterial({
+      color:0x66d9ff,
+      transparent:true,
+      opacity:0.22,
+      depthWrite:false,
+      blending:THREE.AdditiveBlending
+    })
+  );
+  powerUpMesh.add(aura);
+  powerUpMesh.userData.aura = aura;
+  powerUpMesh.userData.basePosition = powerUpPos.clone();
+
+  const glow = new THREE.PointLight(powerColor, 0.9, 3.8, 2);
+  powerUpMesh.add(glow);
+  powerUpMesh.userData.glow = glow;
+
   powerUpMesh.position.copy(powerUpPos);
   powerUpMesh.castShadow = true;
   scene.add(powerUpMesh);
@@ -800,6 +841,9 @@ function createObstacle() {
   obstacle.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), pos.clone().normalize());
   obstacle.castShadow = true;
   obstacle.userData.spin = 0.01 + Math.random() * 0.025;
+  obstacle.userData.phase = Math.random() * Math.PI * 2;
+  obstacle.userData.baseScale = obstacle.scale.clone();
+  obstacle.userData.warningSeed = Math.random() * Math.PI * 2;
   scene.add(obstacle);
   obstacleMeshes.push(obstacle);
 }
@@ -834,6 +878,7 @@ function resetGame() {
   boost = 1;
   underground = false;
   burrowTransition = null;
+  elapsedTime = 0;
   foodPos = null;
   scoreText.textContent = score;
   levelText.textContent = level;
@@ -1086,6 +1131,8 @@ function updateParticles(delta) {
 }
 
 function update(delta) {
+  elapsedTime += delta;
+
   if (gameOver) {
     updateParticles(delta);
     return;
@@ -1178,11 +1225,27 @@ function update(delta) {
     }
   }
 
-  obstacleMeshes.forEach(mesh => mesh.rotateY(mesh.userData.spin * delta * 60));
+  obstacleMeshes.forEach(mesh => {
+    mesh.rotateY(mesh.userData.spin * delta * 60);
+    const pulse = (Math.sin(elapsedTime * 3.7 + mesh.userData.phase) + 1) / 2;
+    const warning = Math.max(0, Math.sin(elapsedTime * 8.5 + mesh.userData.warningSeed));
+    const shimmer = warning > 0.94 ? (warning - 0.94) / 0.06 : 0;
+    mesh.material.emissiveIntensity = 0.65 + pulse * 1.15 + shimmer * 2.2;
+    mesh.scale.copy(mesh.userData.baseScale).multiplyScalar(1 + pulse * 0.08 + shimmer * 0.12);
+  });
   if (powerUpMesh) {
+    const pulse = (Math.sin(elapsedTime * 4.2) + 1) / 2;
+    const bob = Math.sin(elapsedTime * 2.6) * 0.18;
+    const normal = powerUpMesh.userData.basePosition.clone().normalize();
+    powerUpMesh.position.copy(powerUpMesh.userData.basePosition).add(normal.multiplyScalar(bob));
     powerUpMesh.rotation.x += 0.025 * delta * 60;
     powerUpMesh.rotation.y += 0.04 * delta * 60;
-    powerUpMesh.scale.setScalar(1 + Math.sin(performance.now() * 0.005) * 0.1);
+    powerUpMesh.scale.setScalar(1 + Math.sin(elapsedTime * 5) * 0.1);
+    if (powerUpMesh.userData.aura) {
+      powerUpMesh.userData.aura.scale.setScalar(1.05 + pulse * 0.38);
+      powerUpMesh.userData.aura.material.opacity = 0.1 + (1 - pulse) * 0.2;
+    }
+    if (powerUpMesh.userData.glow) powerUpMesh.userData.glow.intensity = 0.65 + pulse * 0.65;
   }
   if (shieldMesh) {
     shieldMesh.position.copy(headPos);
@@ -1190,8 +1253,17 @@ function update(delta) {
     shieldMesh.material.opacity = shield > 0 ? 0.38 + Math.sin(performance.now() * 0.008) * 0.14 : 0;
     shieldMesh.rotateZ(performance.now() * 0.00008);
   }
-  foodMesh.rotation.y += 0.03 * delta * 60;
-  foodMesh.rotation.x += 0.018 * delta * 60;
+  if (foodMesh) {
+    const pulse = (Math.sin(elapsedTime * 5.8) + 1) / 2;
+    foodMesh.rotation.y += 0.03 * delta * 60;
+    foodMesh.rotation.x += 0.018 * delta * 60;
+    foodMesh.scale.setScalar(1 + Math.sin(elapsedTime * 6) * 0.16);
+    if (foodMesh.userData.aura) {
+      foodMesh.userData.aura.scale.setScalar(1.05 + pulse * 0.45);
+      foodMesh.userData.aura.material.opacity = 0.12 + (1 - pulse) * 0.18;
+    }
+    if (foodMesh.userData.glow) foodMesh.userData.glow.intensity = 0.55 + pulse * 0.7;
+  }
   if (undergroundFoodMesh) {
     undergroundFoodMesh.rotation.y += 0.035 * delta * 60;
     undergroundFoodMesh.scale.setScalar(1 + Math.sin(performance.now() * 0.006) * 0.13);
@@ -1210,10 +1282,6 @@ function animate(now = performance.now()) {
   cloudGroup.rotation.y += delta * 0.025;
   stars.rotation.y += delta * 0.006;
   atmosphere.scale.setScalar(1 + Math.sin(now * 0.0016) * 0.006);
-
-  if (foodMesh) {
-    foodMesh.scale.setScalar(1 + Math.sin(now * 0.006) * 0.16);
-  }
 
   update(delta);
   renderer.render(scene, camera);
