@@ -420,6 +420,8 @@ let pianoMesh;
 let pianoPos;
 let pianoMode = false;
 let pianoCooldownUntil = 0;
+let safeUntil = 0;
+let lastMoveDistance = 0;
 let activePianoKeys = {};
 let undergroundDust = [];
 let undergroundPebbles = [];
@@ -686,6 +688,24 @@ function createUndergroundPiano() {
   group.add(keyDeck);
   group.userData.keyDeck = keyDeck;
 
+  const musicStand = new THREE.Mesh(
+    new THREE.BoxGeometry(0.78, 0.055, 0.5),
+    new THREE.MeshStandardMaterial({ color:0x241411, roughness:0.5, metalness:0.12, emissive:0x100604 })
+  );
+  musicStand.position.set(0.02, 0.9, -0.08);
+  musicStand.rotation.x = -0.72;
+  musicStand.castShadow = true;
+  group.add(musicStand);
+
+  const noteBadge = new THREE.Mesh(
+    new THREE.CircleGeometry(0.18, 32),
+    new THREE.MeshBasicMaterial({ color:0xffd166, transparent:true, opacity:0.82, side:THREE.DoubleSide })
+  );
+  noteBadge.position.set(0.02, 1.02, 0.06);
+  noteBadge.rotation.x = -0.72;
+  group.add(noteBadge);
+  group.userData.noteBadge = noteBadge;
+
   for (let i = 0; i < 3; i++) {
     const leg = new THREE.Mesh(
       new THREE.CylinderGeometry(0.045, 0.06, 0.52, 8),
@@ -709,8 +729,9 @@ function setPianoMode(enabled) {
   pianoMode = enabled;
   activePianoKeys = {};
   if (enabled) {
+    safeUntil = Math.max(safeUntil, elapsedTime + 1.5);
     showToast("Piano mode!");
-    messageText.textContent = "Playable piano: press A S D F G H J K to play notes, then E to leave the piano.";
+    messageText.textContent = "Playable piano safe zone: press A S D F G H J K to play notes. The snake rests and cannot crash while performing.";
     playPianoNote("a");
   } else {
     showToast("Back to digging");
@@ -736,6 +757,10 @@ function updatePiano(delta) {
   const pulse = (Math.sin(elapsedTime * 3.8) + 1) / 2;
   pianoMesh.rotation.y = Math.sin(elapsedTime * 0.9) * 0.04;
   if (pianoMesh.userData.glow) pianoMesh.userData.glow.intensity = 0.55 + pulse * 0.75 + (pianoMode ? 0.9 : 0);
+  if (pianoMesh.userData.noteBadge) {
+    pianoMesh.userData.noteBadge.scale.setScalar(1 + pulse * 0.16 + (pianoMode ? 0.22 : 0));
+    pianoMesh.userData.noteBadge.material.opacity = pianoMode ? 0.95 : 0.62 + pulse * 0.22;
+  }
 
   if (pianoMesh.userData.keyDeck) {
     pianoMesh.userData.keyDeck.children.forEach(keyMesh => {
@@ -1232,6 +1257,8 @@ function resetGame() {
   underground = false;
   burrowTransition = null;
   elapsedTime = 0;
+  safeUntil = 2.25;
+  lastMoveDistance = 0;
   foodPos = null;
   scoreText.textContent = score;
   levelText.textContent = level;
@@ -1631,10 +1658,16 @@ function update(delta) {
   boostFill.style.width = `${Math.round(boost * 100)}%`;
   updateBoostWarning();
 
+  const beforeMove = headPos.clone();
   if (underground) moveUnderground(speed);
   else moveOnSphere(speed);
+  lastMoveDistance = headPos.distanceTo(beforeMove);
 
-  snake.unshift(headPos.clone());
+  if (lastMoveDistance > 0.0001) {
+    snake.unshift(headPos.clone());
+  } else {
+    snake[0].copy(headPos);
+  }
 
   const maxLength = 35 + score * 8;
   while (snake.length > maxLength) snake.pop();
@@ -1699,14 +1732,14 @@ function update(delta) {
     clearPowerUp();
   }
 
-  for (let i = 20; i < snake.length; i++) {
-    if (headPos.distanceTo(snake[i]) < 0.28) {
+  if (!pianoMode && elapsedTime >= safeUntil && lastMoveDistance > 0.0001) for (let i = 24; i < snake.length; i++) {
+    if (headPos.distanceTo(snake[i]) < 0.24) {
       if (!absorbCrash("You crossed your own glowing trail.")) endGame("You crossed your own glowing trail.");
       return;
     }
   }
 
-  if (!underground) for (const obstacle of obstacleMeshes) {
+  if (!underground && elapsedTime >= safeUntil) for (const obstacle of obstacleMeshes) {
     if (headPos.distanceTo(obstacle.position) < 0.62) {
       if (!absorbCrash("A crystal meteor shattered the orbit.")) endGame("A crystal meteor shattered the orbit.");
       return;
