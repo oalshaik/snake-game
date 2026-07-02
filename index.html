@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Snake Planet Odyssey</title>
+  <title>Stick Runner Planet Odyssey</title>
   <style>
     :root {
       --panel: rgba(4, 12, 16, .72);
@@ -296,8 +296,8 @@
 <body>
 
 <div id="ui">
-  <h1>Snake Planet Odyssey</h1>
-  <p class="subtitle">Collect comet fruit, board the airplane for 10s flying bonuses, then burrow into muddy tunnels to hide and forage.</p>
+  <h1>Stick Runner Planet Odyssey</h1>
+  <p class="subtitle">Run across the planet as a tiny stick figure, eat comet fruit to grow bigger glutes, board the airplane for 10s flying bonuses, then burrow into muddy tunnels to hide and forage.</p>
   <div class="stats">
     <div class="stat"><span>Score</span><strong id="score">0</strong></div>
     <div class="stat"><span>Best</span><strong id="best">0</strong></div>
@@ -313,7 +313,7 @@
     <div><span class="key">E</span>leave underground piano · <span class="key">A</span>-<span class="key">K</span>keys become piano notes</div>
     <div><span class="key">Space</span>restart after a crash · board the airplane, then smash skyline towers for bonus points</div>
   </div>
-  <div id="message">Eat glowing fruit to spawn more hazards.</div>
+  <div id="message">Eat glowing fruit to make your runner's butt bigger and spawn more hazards.</div>
 </div>
 
 <div id="minimapWrap">
@@ -410,6 +410,7 @@ let headPos;
 let forward;
 let snake = [];
 let snakeMeshes = [];
+let buttScale = 1;
 let foodPos;
 let foodMesh;
 let obstacleMeshes = [];
@@ -639,18 +640,74 @@ function createShieldVisual() {
 }
 
 
+function createLimb(length, radius, material) {
+  const limb = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, length, 8), material);
+  limb.castShadow = true;
+  return limb;
+}
+
 function makeSnakePart(isHead) {
-  const mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(isHead ? 0.34 : 0.27, 24, 24),
-    new THREE.MeshStandardMaterial({
-      color:isHead ? 0xe8fff4 : 0x00ff87,
-      emissive:isHead ? 0x113322 : 0x003d20,
-      roughness:0.28,
-      metalness:0.18
-    })
-  );
-  mesh.castShadow = true;
-  return mesh;
+  const group = new THREE.Group();
+  group.userData.isRunner = isHead;
+
+  if (isHead) {
+    const skinMaterial = new THREE.MeshStandardMaterial({ color:0xf7d2a6, emissive:0x261005, roughness:0.55, metalness:0.02 });
+    const suitMaterial = new THREE.MeshStandardMaterial({ color:0xe8fff4, emissive:0x103b2b, roughness:0.38, metalness:0.08 });
+    const cheekMaterial = new THREE.MeshStandardMaterial({ color:0xff8fb3, emissive:0x3d1021, roughness:0.42, metalness:0.04 });
+    const shoeMaterial = new THREE.MeshStandardMaterial({ color:0x67ffc5, emissive:0x06452e, roughness:0.35, metalness:0.1 });
+
+    const body = createLimb(0.74, 0.035, suitMaterial);
+    body.position.y = 0.25;
+    group.add(body);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 20, 20), skinMaterial);
+    head.position.y = 0.78;
+    head.castShadow = true;
+    group.add(head);
+
+    const hip = new THREE.Group();
+    hip.position.y = -0.12;
+    group.add(hip);
+
+    const leftCheek = new THREE.Mesh(new THREE.SphereGeometry(0.13, 20, 20), cheekMaterial);
+    leftCheek.position.set(-0.11, 0, -0.06);
+    leftCheek.castShadow = true;
+    hip.add(leftCheek);
+
+    const rightCheek = leftCheek.clone();
+    rightCheek.position.x = 0.11;
+    hip.add(rightCheek);
+
+    const leftArm = createLimb(0.55, 0.023, skinMaterial);
+    const rightArm = createLimb(0.55, 0.023, skinMaterial);
+    leftArm.position.set(-0.22, 0.3, 0);
+    rightArm.position.set(0.22, 0.3, 0);
+    group.add(leftArm, rightArm);
+
+    const leftLeg = createLimb(0.62, 0.026, skinMaterial);
+    const rightLeg = createLimb(0.62, 0.026, skinMaterial);
+    leftLeg.position.set(-0.12, -0.48, 0);
+    rightLeg.position.set(0.12, -0.48, 0);
+    group.add(leftLeg, rightLeg);
+
+    const leftShoe = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.055, 0.09), shoeMaterial);
+    const rightShoe = leftShoe.clone();
+    leftShoe.position.set(-0.16, -0.8, 0.1);
+    rightShoe.position.set(0.16, -0.8, -0.1);
+    leftShoe.castShadow = true;
+    rightShoe.castShadow = true;
+    group.add(leftShoe, rightShoe);
+
+    group.userData.parts = { body, head, hip, leftCheek, rightCheek, leftArm, rightArm, leftLeg, rightLeg, leftShoe, rightShoe };
+  } else {
+    const footprintMaterial = new THREE.MeshBasicMaterial({ color:0x67ffc5, transparent:true, opacity:0.34, depthWrite:false });
+    const footprint = new THREE.Mesh(new THREE.RingGeometry(0.08, 0.14, 16), footprintMaterial);
+    footprint.rotation.x = Math.PI / 2;
+    group.add(footprint);
+    group.userData.parts = { footprint };
+  }
+
+  return group;
 }
 
 function createUndergroundPiano() {
@@ -1391,7 +1448,8 @@ function resetGame() {
   comboText.textContent = "x1";
   shieldText.textContent = shield;
   flightText.textContent = "0s";
-  messageText.textContent = "Eat glowing fruit to build combos. Blue relics grant shields.";
+  messageText.textContent = "Eat glowing fruit to grow your runner's butt and build combos. Blue relics grant shields.";
+  buttScale = 1;
   boostFill.style.width = "100%";
   updateBoostWarning();
   gameOver = false;
@@ -1442,7 +1500,7 @@ function resetGame() {
 
 function syncMeshes() {
   while (snakeMeshes.length < snake.length) {
-    const mesh = makeSnakePart(false);
+    const mesh = makeSnakePart(snakeMeshes.length === 0);
     scene.add(mesh);
     snakeMeshes.push(mesh);
   }
@@ -1461,8 +1519,7 @@ function updateSnakeVisuals() {
 
   for (let i = 0; i < snake.length; i++) {
     const mesh = snakeMeshes[i];
-    const wave = Math.sin(t * 8 - i * 0.55);
-    const taper = 1 - Math.min(i / snake.length, 1) * 0.18;
+    const wave = Math.sin(t * 9 - i * 0.65);
     const up = underground ? worldUp.clone() : snake[i].clone().normalize();
     const segmentForward = i === 0
       ? forward.clone()
@@ -1483,23 +1540,44 @@ function updateSnakeVisuals() {
     const orientation = new THREE.Matrix4().makeBasis(right, up, correctedForward);
 
     mesh.position.copy(snake[i]);
-    if (i > 0) mesh.position.add(right.multiplyScalar(wave * 0.045));
     mesh.quaternion.setFromRotationMatrix(orientation);
 
-    const hue = 0.39 + Math.sin((i * 0.18) + t * 8) * 0.035;
-    const glow = i === 0 ? 0.12 + wave * 0.018 : 0.055 + wave * 0.012;
-    mesh.material.color.setHSL(underground ? 0.28 : (i === 0 ? 0.43 : hue), underground ? 0.85 : 1, i === 0 ? 0.82 : 0.46);
-    mesh.material.emissive.setHSL(underground ? 0.08 : 0.42, 1, glow);
+    if (mesh.userData.isRunner) {
+      const stride = Math.sin(t * (lastMoveDistance > 0.0001 ? 13 : 4));
+      const bounce = Math.abs(stride) * 0.065;
+      mesh.position.add(up.clone().multiplyScalar(0.42 + bounce));
+      mesh.scale.setScalar(underground ? 0.86 : 1);
 
-    if (i === 0) {
-      const headPulse = 1.28 + wave * 0.035;
-      mesh.scale.set(headPulse * 1.04, headPulse, headPulse * 1.08);
+      const parts = mesh.userData.parts;
+      parts.leftArm.rotation.x = 0.85 * stride;
+      parts.rightArm.rotation.x = -0.85 * stride;
+      parts.leftArm.rotation.z = 0.42;
+      parts.rightArm.rotation.z = -0.42;
+      parts.leftLeg.rotation.x = -0.95 * stride;
+      parts.rightLeg.rotation.x = 0.95 * stride;
+      parts.leftLeg.rotation.z = -0.16;
+      parts.rightLeg.rotation.z = 0.16;
+      parts.leftShoe.position.z = 0.1 + stride * 0.14;
+      parts.rightShoe.position.z = -0.1 - stride * 0.14;
+      parts.hip.scale.set(1 + buttScale * 0.34, 1 + buttScale * 0.1, 1 + buttScale * 0.42);
+      parts.hip.rotation.x = Math.sin(t * 10) * 0.08;
+      parts.head.position.y = 0.78 + Math.sin(t * 8) * 0.025;
     } else {
-      const stretch = 1 + wave * 0.12;
-      const squash = 1 - wave * 0.06;
-      mesh.scale.set(taper * squash, taper * squash, taper * stretch);
+      const parts = mesh.userData.parts;
+      const fade = Math.max(0, 1 - i / Math.min(snake.length, 48));
+      const strideSide = (i % 2 === 0 ? 1 : -1) * 0.16;
+      mesh.position.add(right.clone().multiplyScalar(strideSide));
+      mesh.position.add(up.clone().multiplyScalar(0.025));
+      parts.footprint.material.opacity = 0.28 * fade;
+      parts.footprint.material.color.setHSL(underground ? 0.09 : 0.43, 1, 0.5);
+      parts.footprint.scale.set(0.85 + fade * 0.55, 0.85 + fade * 0.55, 1);
+      parts.footprint.visible = i % 3 === 0;
     }
   }
+}
+
+function growButt(amount = 1) {
+  buttScale = Math.min(4.5, buttScale + amount * 0.18);
 }
 
 function growSnake(amount) {
@@ -1847,13 +1925,14 @@ function update(delta) {
     pulseElement(scoreText, "hud-pop");
     pulseElement(comboText, "combo-pop");
     growSnake(7 + combo);
+    growButt(combo);
     burst(foodPos, combo > 2 ? 0xfff1a6 : 0xffd166, combo > 2 ? { combo } : {});
     playTone(360 + combo * 90, 0.1, "triangle", 0.055);
-    showToast(combo > 1 ? `Combo x${combo}!` : "Comet fruit!");
+    showToast(combo > 1 ? `Combo x${combo}: bigger butt!` : "Bigger butt!");
     createFood();
     if (score % 3 === 0 && obstacleMeshes.length < 20) createObstacle();
     if (score > 0 && score % 10 === 0 && !powerUpMesh) createPowerUp();
-    messageText.textContent = combo > 3 ? "Meteoric combo! Keep the streak alive." : "Nice catch! Keep carving the curve.";
+    messageText.textContent = combo > 3 ? "Meteoric combo! The runner's butt is getting massive." : "Nice catch! That comet fruit made the runner's butt bigger.";
   }
 
   if (underground && pianoMesh && headPos.distanceTo(pianoPos) < 1.35) {
@@ -1872,13 +1951,14 @@ function update(delta) {
     pulseElement(scoreText, "hud-pop");
     pulseElement(comboText, "combo-pop");
     growSnake(6 + combo);
+    growButt(combo * 0.8);
     burst(undergroundFoodPos, 0xffc15a);
     triggerUndergroundDustBurst(undergroundFoodPos, 18 + combo * 4);
     pulseNearbyPebbles(undergroundFoodPos);
     playTone(260 + combo * 70, 0.12, "triangle", 0.05);
-    showToast(combo > 1 ? `Mud combo x${combo}!` : "Root snack!");
+    showToast(combo > 1 ? `Mud combo x${combo}: bigger butt!` : "Root snack: bigger butt!");
     createUndergroundFood();
-    messageText.textContent = "You found food in the dirt. Stay hidden, or press Space to jump back up.";
+    messageText.textContent = "You found food in the dirt, and the runner's butt grew. Stay hidden, or press Space to jump back up.";
   }
 
   if (flyingMode) for (let i = buildingMeshes.length - 1; i >= 0; i--) {
