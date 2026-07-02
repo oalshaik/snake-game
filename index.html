@@ -56,7 +56,7 @@
 
     .stats {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       gap: 8px;
       margin-bottom: 14px;
     }
@@ -157,6 +157,53 @@
       transition: width .12s linear;
     }
 
+    #toast {
+      position: fixed;
+      left: 50%;
+      top: 23%;
+      z-index: 11;
+      transform: translate(-50%, -20px) scale(.96);
+      padding: 13px 20px;
+      border: 1px solid rgba(255, 255, 255, .2);
+      border-radius: 999px;
+      background: rgba(4, 12, 16, .75);
+      color: white;
+      font-weight: 900;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      opacity: 0;
+      pointer-events: none;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, .35), 0 0 30px rgba(103, 255, 197, .2);
+      transition: opacity .22s ease, transform .22s ease;
+      backdrop-filter: blur(14px);
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translate(-50%, 0) scale(1);
+    }
+
+    #vignette {
+      position: fixed;
+      inset: 0;
+      z-index: 9;
+      pointer-events: none;
+      background: radial-gradient(circle at 50% 45%, transparent 42%, rgba(0, 0, 0, .34) 100%);
+      mix-blend-mode: multiply;
+    }
+
+    #damageFlash {
+      position: fixed;
+      inset: 0;
+      z-index: 12;
+      pointer-events: none;
+      background: radial-gradient(circle, rgba(255, 92, 122, .34), rgba(255, 92, 122, 0) 58%);
+      opacity: 0;
+      transition: opacity .22s ease;
+    }
+
+    #damageFlash.show { opacity: 1; }
+
     #gameOver {
       display: none;
       position: fixed;
@@ -195,6 +242,7 @@
       #ui h1 { font-size: 1.05rem; }
       .subtitle, .controls, #message { font-size: .74rem; }
       .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .stat:nth-child(n+4) { display: none; }
     }
   </style>
 </head>
@@ -207,11 +255,13 @@
     <div class="stat"><span>Score</span><strong id="score">0</strong></div>
     <div class="stat"><span>Best</span><strong id="best">0</strong></div>
     <div class="stat"><span>Level</span><strong id="level">1</strong></div>
+    <div class="stat"><span>Combo</span><strong id="combo">x1</strong></div>
+    <div class="stat"><span>Shield</span><strong id="shield">0</strong></div>
   </div>
   <div class="controls">
     <div><span class="key">A</span><span class="key">D</span>or arrows to carve across the planet</div>
     <div><span class="key">W</span>or <span class="key">↑</span>to boost while energy lasts</div>
-    <div><span class="key">Space</span>restart after a crash</div>
+    <div><span class="key">Space</span>restart after a crash · blue relics grant shields</div>
   </div>
   <div id="message">Eat glowing fruit to spawn more hazards.</div>
 </div>
@@ -223,6 +273,10 @@
 <div id="boostMeter" aria-label="Boost energy">
   <div id="boostFill"></div>
 </div>
+
+<div id="toast"></div>
+<div id="vignette"></div>
+<div id="damageFlash"></div>
 
 <div id="gameOver">
   <div class="card">
@@ -264,10 +318,14 @@ const SURFACE = R + 0.35;
 const scoreText = document.getElementById("score");
 const bestText = document.getElementById("best");
 const levelText = document.getElementById("level");
+const comboText = document.getElementById("combo");
+const shieldText = document.getElementById("shield");
 const messageText = document.getElementById("message");
 const boostFill = document.getElementById("boostFill");
 const finalScoreText = document.getElementById("finalScore");
 const finalBestText = document.getElementById("finalBest");
+const toastBox = document.getElementById("toast");
+const damageFlash = document.getElementById("damageFlash");
 const gameOverBox = document.getElementById("gameOver");
 const mapCanvas = document.getElementById("minimap");
 const mapCtx = mapCanvas.getContext("2d");
@@ -275,6 +333,9 @@ const mapCtx = mapCanvas.getContext("2d");
 let score = 0;
 let best = Number(localStorage.getItem("snakePlanetBest") || 0);
 let level = 1;
+let combo = 1;
+let comboTimer = 0;
+let shield = 0;
 let boost = 1;
 let gameOver = false;
 let keys = {};
@@ -285,7 +346,14 @@ let snakeMeshes = [];
 let foodPos;
 let foodMesh;
 let obstacleMeshes = [];
+let landmarkMeshes = [];
 let particles = [];
+let powerUpPos;
+let powerUpMesh;
+let shieldMesh;
+let audioCtx;
+let shake = 0;
+let toastTimer;
 let lastTime = performance.now();
 
 bestText.textContent = best;
@@ -330,6 +398,65 @@ for (let i = 0; i < 900; i++) {
 starGeometry.setAttribute("position", new THREE.Float32BufferAttribute(starPositions, 3));
 const stars = new THREE.Points(starGeometry, new THREE.PointsMaterial({ color:0xcaffee, size:0.18, transparent:true, opacity:0.82 }));
 scene.add(stars);
+
+function playTone(frequency, duration = 0.12, type = "sine", gain = 0.05) {
+  if (!audioCtx) return;
+  const oscillator = audioCtx.createOscillator();
+  const volume = audioCtx.createGain();
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+  volume.gain.setValueAtTime(gain, audioCtx.currentTime);
+  volume.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  oscillator.connect(volume).connect(audioCtx.destination);
+  oscillator.start();
+  oscillator.stop(audioCtx.currentTime + duration);
+}
+
+function showToast(text) {
+  toastBox.textContent = text;
+  toastBox.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastBox.classList.remove("show"), 900);
+}
+
+function flashDamage() {
+  damageFlash.classList.add("show");
+  setTimeout(() => damageFlash.classList.remove("show"), 130);
+}
+
+function createLandmarks() {
+  landmarkMeshes.forEach(mesh => scene.remove(mesh));
+  landmarkMeshes = [];
+
+  for (let i = 0; i < 52; i++) {
+    const isCrystal = i % 3 === 0;
+    const geometry = isCrystal
+      ? new THREE.OctahedronGeometry(0.12 + Math.random() * 0.12, 0)
+      : new THREE.ConeGeometry(0.08 + Math.random() * 0.06, 0.38 + Math.random() * 0.36, 6);
+    const material = new THREE.MeshStandardMaterial({
+      color: isCrystal ? 0x8cf7ff : 0x0f9d5c,
+      emissive: isCrystal ? 0x082c34 : 0x001b0d,
+      roughness: 0.5,
+      metalness: isCrystal ? 0.35 : 0.05
+    });
+    const landmark = new THREE.Mesh(geometry, material);
+    const pos = randomPointOnSphere(R + 0.42 + Math.random() * 0.08);
+    landmark.position.copy(pos);
+    landmark.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), pos.clone().normalize());
+    landmark.castShadow = true;
+    scene.add(landmark);
+    landmarkMeshes.push(landmark);
+  }
+}
+
+function createShieldVisual() {
+  shieldMesh = new THREE.Mesh(
+    new THREE.TorusGeometry(0.58, 0.025, 10, 80),
+    new THREE.MeshBasicMaterial({ color:0x7ed7ff, transparent:true, opacity:0 })
+  );
+  scene.add(shieldMesh);
+}
+
 
 function makeSnakePart(isHead) {
   const mesh = new THREE.Mesh(
@@ -401,6 +528,33 @@ function createFood() {
   scene.add(foodMesh);
 }
 
+function createPowerUp() {
+  if (powerUpMesh) scene.remove(powerUpMesh);
+
+  let nextPowerUpPos = null;
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const candidate = randomPointOnSphere();
+    if (farFromSnake(candidate, 2.0) && candidate.distanceTo(foodPos) > 2.0 && obstacleMeshes.every(o => o.position.distanceTo(candidate) > 1.8)) {
+      nextPowerUpPos = candidate;
+      break;
+    }
+  }
+  powerUpPos = nextPowerUpPos || randomPointOnSphere();
+  powerUpMesh = new THREE.Mesh(
+    new THREE.TorusKnotGeometry(0.26, 0.075, 72, 10),
+    new THREE.MeshStandardMaterial({ color:0x7ed7ff, emissive:0x0b4f76, roughness:0.18, metalness:0.5 })
+  );
+  powerUpMesh.position.copy(powerUpPos);
+  powerUpMesh.castShadow = true;
+  scene.add(powerUpMesh);
+}
+
+function clearPowerUp() {
+  if (powerUpMesh) scene.remove(powerUpMesh);
+  powerUpMesh = null;
+  powerUpPos = null;
+}
+
 function createObstacle() {
   let pos = randomPointOnSphere();
   for (let attempt = 0; attempt < 80; attempt++) {
@@ -447,11 +601,16 @@ function burst(position, color) {
 function resetGame() {
   score = 0;
   level = 1;
+  combo = 1;
+  comboTimer = 0;
+  shield = 0;
   boost = 1;
   foodPos = null;
   scoreText.textContent = score;
   levelText.textContent = level;
-  messageText.textContent = "Eat glowing fruit to spawn more hazards.";
+  comboText.textContent = "x1";
+  shieldText.textContent = shield;
+  messageText.textContent = "Eat glowing fruit to build combos. Blue relics grant shields.";
   boostFill.style.width = "100%";
   gameOver = false;
   gameOverBox.style.display = "none";
@@ -461,6 +620,7 @@ function resetGame() {
   snake = [];
   particles.forEach(p => scene.remove(p));
   particles = [];
+  clearPowerUp();
 
   headPos = new THREE.Vector3(0, SURFACE, 0);
   forward = new THREE.Vector3(1, 0, 0);
@@ -475,6 +635,7 @@ function resetGame() {
   syncMeshes();
   resetObstacles();
   createFood();
+  if (!landmarkMeshes.length) createLandmarks();
   updateCamera(true);
   updateMinimap();
 }
@@ -518,6 +679,21 @@ function growSnake(amount) {
   syncMeshes();
 }
 
+function absorbCrash(reason) {
+  if (shield <= 0) return false;
+  shield--;
+  shieldText.textContent = shield;
+  shake = 0.65;
+  flashDamage();
+  burst(headPos, 0x7ed7ff);
+  playTone(180, 0.09, "sawtooth", 0.05);
+  playTone(420, 0.18, "sine", 0.04);
+  showToast("Shield saved you!");
+  messageText.textContent = `${reason} Shield absorbed the impact.`;
+  growSnake(4);
+  return true;
+}
+
 function endGame(reason) {
   gameOver = true;
   messageText.textContent = reason;
@@ -527,7 +703,10 @@ function endGame(reason) {
   finalScoreText.textContent = score;
   finalBestText.textContent = best;
   gameOverBox.style.display = "grid";
+  shake = 1;
+  flashDamage();
   burst(headPos, 0xff5c7a);
+  playTone(120, 0.35, "sawtooth", 0.07);
 }
 
 function updateCamera(instant = false) {
@@ -536,6 +715,11 @@ function updateCamera(instant = false) {
   const wantedPos = headPos.clone()
     .add(forward.clone().multiplyScalar(-4.9))
     .add(up.clone().multiplyScalar(1.65));
+
+  if (shake > 0) {
+    wantedPos.add(randomPointOnSphere(1).multiplyScalar(shake * 0.12));
+    shake = Math.max(0, shake - 0.04);
+  }
 
   if (instant) camera.position.copy(wantedPos);
   else camera.position.lerp(wantedPos, 0.22);
@@ -589,6 +773,14 @@ function updateMinimap() {
     mapCtx.fill();
   });
 
+  if (powerUpPos) {
+    const relic = project(powerUpPos);
+    mapCtx.beginPath();
+    mapCtx.arc(relic.x, relic.y, 5, 0, Math.PI * 2);
+    mapCtx.fillStyle = relic.hidden ? "rgba(126,215,255,.35)" : "#7ed7ff";
+    mapCtx.fill();
+  }
+
   const f = project(foodPos);
   mapCtx.beginPath();
   mapCtx.arc(f.x, f.y, 5, 0, Math.PI * 2);
@@ -620,6 +812,12 @@ function update(delta) {
   if (keys["a"] || keys["ArrowLeft"]) turnDirection(turnSpeed);
   if (keys["d"] || keys["ArrowRight"]) turnDirection(-turnSpeed);
 
+  comboTimer = Math.max(0, comboTimer - delta);
+  if (comboTimer === 0 && combo !== 1) {
+    combo = 1;
+    comboText.textContent = "x1";
+  }
+
   const wantsBoost = keys["w"] || keys["ArrowUp"];
   const canBoost = wantsBoost && boost > 0.02;
   const baseSpeed = 0.075 + Math.min(score, 18) * 0.002;
@@ -635,32 +833,61 @@ function update(delta) {
   while (snake.length > maxLength) snake.pop();
 
   if (headPos.distanceTo(foodPos) < 0.78) {
-    score++;
-    level = 1 + Math.floor(score / 4);
+    combo = Math.min(5, comboTimer > 0 ? combo + 1 : 1);
+    comboTimer = 4.2;
+    score += combo;
+    level = 1 + Math.floor(score / 8);
     scoreText.textContent = score;
     levelText.textContent = level;
-    growSnake(8);
-    burst(foodPos, 0xffd166);
+    comboText.textContent = `x${combo}`;
+    growSnake(7 + combo);
+    burst(foodPos, combo > 2 ? 0xfff1a6 : 0xffd166);
+    playTone(360 + combo * 90, 0.1, "triangle", 0.055);
+    showToast(combo > 1 ? `Combo x${combo}!` : "Comet fruit!");
     createFood();
-    if (score % 2 === 0 && obstacleMeshes.length < 16) createObstacle();
-    messageText.textContent = score % 4 === 0 ? "Level up! The orbit is getting crowded." : "Nice catch! Keep carving the curve.";
+    if (score % 3 === 0 && obstacleMeshes.length < 20) createObstacle();
+    if (score > 0 && score % 10 === 0 && !powerUpMesh) createPowerUp();
+    messageText.textContent = combo > 3 ? "Meteoric combo! Keep the streak alive." : "Nice catch! Keep carving the curve.";
+  }
+
+  if (powerUpPos && headPos.distanceTo(powerUpPos) < 0.82) {
+    shield = Math.min(3, shield + 1);
+    shieldText.textContent = shield;
+    boost = 1;
+    burst(powerUpPos, 0x7ed7ff);
+    playTone(660, 0.08, "sine", 0.05);
+    playTone(990, 0.16, "triangle", 0.045);
+    showToast("Shield relic acquired");
+    messageText.textContent = "Shield ready. One crash can become a comeback.";
+    clearPowerUp();
   }
 
   for (let i = 20; i < snake.length; i++) {
     if (headPos.distanceTo(snake[i]) < 0.28) {
-      endGame("You crossed your own glowing trail.");
+      if (!absorbCrash("You crossed your own glowing trail.")) endGame("You crossed your own glowing trail.");
       return;
     }
   }
 
   for (const obstacle of obstacleMeshes) {
     if (headPos.distanceTo(obstacle.position) < 0.62) {
-      endGame("A crystal meteor shattered the orbit.");
+      if (!absorbCrash("A crystal meteor shattered the orbit.")) endGame("A crystal meteor shattered the orbit.");
       return;
     }
   }
 
   obstacleMeshes.forEach(mesh => mesh.rotateY(mesh.userData.spin * delta * 60));
+  if (powerUpMesh) {
+    powerUpMesh.rotation.x += 0.025 * delta * 60;
+    powerUpMesh.rotation.y += 0.04 * delta * 60;
+    powerUpMesh.scale.setScalar(1 + Math.sin(performance.now() * 0.005) * 0.1);
+  }
+  if (shieldMesh) {
+    shieldMesh.position.copy(headPos);
+    shieldMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), headPos.clone().normalize());
+    shieldMesh.material.opacity = shield > 0 ? 0.38 + Math.sin(performance.now() * 0.008) * 0.14 : 0;
+    shieldMesh.rotateZ(performance.now() * 0.00008);
+  }
   foodMesh.rotation.y += 0.03 * delta * 60;
   foodMesh.rotation.x += 0.018 * delta * 60;
   updateParticles(delta);
@@ -687,6 +914,8 @@ function animate(now = performance.now()) {
 }
 
 document.addEventListener("keydown", e => {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") audioCtx.resume();
   keys[e.key] = true;
   if (e.code === "Space") resetGame();
 });
@@ -701,6 +930,7 @@ window.addEventListener("resize", () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
+createShieldVisual();
 resetGame();
 animate();
 </script>
