@@ -724,16 +724,31 @@ function createUndergroundPiano() {
   return group;
 }
 
+function clearPianoMovementKeys() {
+  Object.keys(pianoKeyMap).forEach(keyName => {
+    keys[keyName] = false;
+  });
+}
+
+function isInPianoSafeZone() {
+  return underground && pianoPos && headPos && headPos.distanceTo(pianoPos) < 1.9;
+}
+
 function setPianoMode(enabled) {
   if (pianoMode === enabled) return;
   pianoMode = enabled;
   activePianoKeys = {};
+  clearPianoMovementKeys();
   if (enabled) {
-    safeUntil = Math.max(safeUntil, elapsedTime + 1.5);
+    safeUntil = Math.max(safeUntil, elapsedTime + 2.0);
+    boost = 1;
+    boostFill.style.width = "100%";
+    updateBoostWarning();
     showToast("Piano mode!");
     messageText.textContent = "Playable piano safe zone: press A S D F G H J K to play notes. The snake rests and cannot crash while performing.";
     playPianoNote("a");
   } else {
+    safeUntil = Math.max(safeUntil, elapsedTime + 2.0);
     showToast("Back to digging");
     messageText.textContent = "Mud tunnel mode: find roots, visit the piano, or press Space to jump back to the sphere.";
     pianoCooldownUntil = elapsedTime + 1.25;
@@ -1648,7 +1663,7 @@ function update(delta) {
     pulseElement(comboText, "combo-pop");
   }
 
-  const wantsBoost = keys["w"] || keys["ArrowUp"];
+  const wantsBoost = !pianoMode && (keys["w"] || keys["ArrowUp"]);
   const canBoost = wantsBoost && boost > 0.02;
   const baseSpeed = 0.075 + Math.min(score, 18) * 0.002;
   const moveRate = canBoost ? 0.142 : baseSpeed;
@@ -1732,14 +1747,16 @@ function update(delta) {
     clearPowerUp();
   }
 
-  if (!pianoMode && elapsedTime >= safeUntil && lastMoveDistance > 0.0001) for (let i = 24; i < snake.length; i++) {
+  const collisionSafe = pianoMode || isInPianoSafeZone() || elapsedTime < safeUntil;
+
+  if (!collisionSafe && lastMoveDistance > 0.0001) for (let i = 24; i < snake.length; i++) {
     if (headPos.distanceTo(snake[i]) < 0.24) {
       if (!absorbCrash("You crossed your own glowing trail.")) endGame("You crossed your own glowing trail.");
       return;
     }
   }
 
-  if (!underground && elapsedTime >= safeUntil) for (const obstacle of obstacleMeshes) {
+  if (!underground && !collisionSafe) for (const obstacle of obstacleMeshes) {
     if (headPos.distanceTo(obstacle.position) < 0.62) {
       if (!absorbCrash("A crystal meteor shattered the orbit.")) endGame("A crystal meteor shattered the orbit.");
       return;
@@ -1821,6 +1838,7 @@ document.addEventListener("keydown", e => {
   keys[key] = true;
   if (pianoMode && pianoKeyMap[key]) {
     e.preventDefault();
+    keys[key] = false;
     playPianoNote(key);
     return;
   }
