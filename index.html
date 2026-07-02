@@ -1,42 +1,235 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Snake Planet POV</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Snake Planet Odyssey</title>
   <style>
-    body { margin:0; overflow:hidden; background:#020806; font-family:Arial; color:white; }
+    :root {
+      --panel: rgba(4, 12, 16, .72);
+      --panel-border: rgba(116, 255, 197, .35);
+      --accent: #67ffc5;
+      --accent-2: #ffd166;
+      --danger: #ff5c7a;
+      --text-muted: #b7d4cc;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: radial-gradient(circle at 50% 35%, #102b25 0%, #071611 42%, #020507 100%);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: white;
+    }
+
+    canvas { display: block; }
+
     #ui {
-      position:fixed; top:20px; left:20px; z-index:10;
-      background:rgba(0,0,0,.45); padding:15px 20px; border-radius:16px;
+      position: fixed;
+      top: 22px;
+      left: 22px;
+      z-index: 10;
+      width: min(320px, calc(100vw - 44px));
+      padding: 18px 20px;
+      border: 1px solid var(--panel-border);
+      border-radius: 22px;
+      background: linear-gradient(145deg, rgba(6, 26, 28, .82), var(--panel));
+      box-shadow: 0 22px 60px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(255, 255, 255, .08);
+      backdrop-filter: blur(14px);
     }
+
+    #ui h1 {
+      margin: 0 0 6px;
+      font-size: 1.35rem;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    #ui .subtitle {
+      margin: 0 0 14px;
+      color: var(--text-muted);
+      font-size: .88rem;
+      line-height: 1.35;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .stat {
+      padding: 10px 8px;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, .07);
+      text-align: center;
+    }
+
+    .stat span {
+      display: block;
+      color: var(--text-muted);
+      font-size: .68rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .stat strong {
+      display: block;
+      margin-top: 3px;
+      font-size: 1.1rem;
+      color: var(--accent);
+    }
+
+    .controls {
+      display: grid;
+      gap: 7px;
+      color: #d9fff4;
+      font-size: .82rem;
+    }
+
+    .key {
+      display: inline-grid;
+      min-width: 27px;
+      height: 24px;
+      place-items: center;
+      margin-right: 6px;
+      padding: 0 7px;
+      border: 1px solid rgba(255, 255, 255, .18);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, .1);
+      color: white;
+      font-weight: 800;
+      box-shadow: inset 0 -2px 0 rgba(0, 0, 0, .2);
+    }
+
+    #message {
+      margin-top: 14px;
+      min-height: 20px;
+      color: var(--accent-2);
+      font-size: .83rem;
+    }
+
+    #minimapWrap {
+      position: fixed;
+      top: 22px;
+      right: 22px;
+      z-index: 10;
+      width: 190px;
+      height: 190px;
+      padding: 10px;
+      border: 1px solid var(--panel-border);
+      border-radius: 50%;
+      background: var(--panel);
+      box-shadow: 0 22px 60px rgba(0, 0, 0, .35), 0 0 45px rgba(0, 255, 136, .16);
+      backdrop-filter: blur(14px);
+    }
+
     #minimap {
-      position:fixed; top:20px; right:20px; z-index:10;
-      width:170px; height:170px;
-      background:rgba(0,0,0,.5);
-      border:2px solid #00ff88;
-      border-radius:50%;
+      width: 170px;
+      height: 170px;
+      border-radius: 50%;
     }
+
+    #boostMeter {
+      position: fixed;
+      left: 50%;
+      bottom: 26px;
+      z-index: 10;
+      width: min(420px, calc(100vw - 44px));
+      height: 14px;
+      transform: translateX(-50%);
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, .16);
+      border-radius: 999px;
+      background: rgba(0, 0, 0, .45);
+      box-shadow: 0 10px 40px rgba(0, 0, 0, .28);
+    }
+
+    #boostFill {
+      width: 100%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #42f5a7, #ffd166, #ff7b7b);
+      box-shadow: 0 0 25px rgba(103, 255, 197, .48);
+      transition: width .12s linear;
+    }
+
     #gameOver {
-      display:none; position:fixed; inset:0; place-items:center;
-      background:rgba(0,0,0,.55); z-index:20; text-align:center;
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      place-items: center;
+      padding: 22px;
+      text-align: center;
+      background: radial-gradient(circle, rgba(12, 38, 36, .72), rgba(0, 0, 0, .78));
+      backdrop-filter: blur(10px);
+    }
+
+    #gameOver .card {
+      width: min(440px, 100%);
+      padding: 34px 30px;
+      border: 1px solid rgba(255, 255, 255, .16);
+      border-radius: 28px;
+      background: linear-gradient(145deg, rgba(9, 32, 36, .94), rgba(4, 8, 14, .94));
+      box-shadow: 0 30px 90px rgba(0, 0, 0, .5);
+    }
+
+    #gameOver h2 {
+      margin: 0 0 10px;
+      font-size: 2.2rem;
+    }
+
+    #gameOver p {
+      margin: 8px 0;
+      color: var(--text-muted);
+    }
+
+    @media (max-width: 720px) {
+      #minimapWrap { width: 124px; height: 124px; padding: 7px; }
+      #minimap { width: 110px; height: 110px; }
+      #ui { top: 14px; left: 14px; padding: 14px; }
+      #ui h1 { font-size: 1.05rem; }
+      .subtitle, .controls, #message { font-size: .74rem; }
+      .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
   </style>
 </head>
 <body>
 
 <div id="ui">
-  <h2>Snake Planet POV</h2>
-  <p>A / D = Turn</p>
-  <p>W = Speed up</p>
-  <p>Space = Restart</p>
-  <h3>Score: <span id="score">0</span></h3>
+  <h1>Snake Planet Odyssey</h1>
+  <p class="subtitle">Collect comet fruit, dodge crystal meteors, and grow your orbiting serpent.</p>
+  <div class="stats">
+    <div class="stat"><span>Score</span><strong id="score">0</strong></div>
+    <div class="stat"><span>Best</span><strong id="best">0</strong></div>
+    <div class="stat"><span>Level</span><strong id="level">1</strong></div>
+  </div>
+  <div class="controls">
+    <div><span class="key">A</span><span class="key">D</span>or arrows to carve across the planet</div>
+    <div><span class="key">W</span>or <span class="key">↑</span>to boost while energy lasts</div>
+    <div><span class="key">Space</span>restart after a crash</div>
+  </div>
+  <div id="message">Eat glowing fruit to spawn more hazards.</div>
 </div>
 
-<canvas id="minimap" width="170" height="170"></canvas>
+<div id="minimapWrap">
+  <canvas id="minimap" width="170" height="170"></canvas>
+</div>
+
+<div id="boostMeter" aria-label="Boost energy">
+  <div id="boostFill"></div>
+</div>
 
 <div id="gameOver">
-  <div>
-    <h1>Game Over</h1>
-    <p>Press Space to Restart</p>
+  <div class="card">
+    <h2>Orbit Broken</h2>
+    <p>Final score: <strong id="finalScore">0</strong></p>
+    <p>Best score: <strong id="finalBest">0</strong></p>
+    <p>Press <strong>Space</strong> to launch again.</p>
   </div>
 </div>
 
@@ -44,26 +237,45 @@
 
 <script>
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x06120d);
+scene.background = new THREE.Color(0x03090d);
+scene.fog = new THREE.FogExp2(0x04110f, 0.022);
 
-const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
-scene.add(new THREE.AmbientLight(0x88ffaa, 0.75));
+scene.add(new THREE.HemisphereLight(0xb8ffe0, 0x06140f, 1.35));
 
-const sun = new THREE.DirectionalLight(0xffffff, 2.2);
-sun.position.set(5, 8, 5);
+const sun = new THREE.DirectionalLight(0xffffff, 2.6);
+sun.position.set(9, 12, 7);
+sun.castShadow = true;
 scene.add(sun);
 
+const rimLight = new THREE.DirectionalLight(0x66ddff, 1.1);
+rimLight.position.set(-8, 3, -9);
+scene.add(rimLight);
+
 const R = 8;
+const SURFACE = R + 0.35;
 const scoreText = document.getElementById("score");
+const bestText = document.getElementById("best");
+const levelText = document.getElementById("level");
+const messageText = document.getElementById("message");
+const boostFill = document.getElementById("boostFill");
+const finalScoreText = document.getElementById("finalScore");
+const finalBestText = document.getElementById("finalBest");
 const gameOverBox = document.getElementById("gameOver");
 const mapCanvas = document.getElementById("minimap");
 const mapCtx = mapCanvas.getContext("2d");
 
 let score = 0;
+let best = Number(localStorage.getItem("snakePlanetBest") || 0);
+let level = 1;
+let boost = 1;
 let gameOver = false;
 let keys = {};
 let headPos;
@@ -72,30 +284,73 @@ let snake = [];
 let snakeMeshes = [];
 let foodPos;
 let foodMesh;
+let obstacleMeshes = [];
+let particles = [];
+let lastTime = performance.now();
+
+bestText.textContent = best;
 
 const planet = new THREE.Mesh(
-  new THREE.SphereGeometry(R, 96, 96),
-  new THREE.MeshStandardMaterial({ color:0x1f6b3d, roughness:0.9 })
+  new THREE.SphereGeometry(R, 128, 128),
+  new THREE.MeshStandardMaterial({
+    color:0x1f7042,
+    roughness:0.95,
+    metalness:0.04
+  })
 );
+planet.receiveShadow = true;
 scene.add(planet);
 
-function makeSnakePart(isHead) {
-  return new THREE.Mesh(
-    new THREE.SphereGeometry(isHead ? 0.34 : 0.27, 24, 24),
-    new THREE.MeshStandardMaterial({
-      color:isHead ? 0xb6ffd3 : 0x00ff77,
-      roughness:0.35,
-      metalness:0.2
-    })
+const atmosphere = new THREE.Mesh(
+  new THREE.SphereGeometry(R + 0.18, 128, 128),
+  new THREE.MeshBasicMaterial({ color:0x4dffc0, transparent:true, opacity:0.08, side:THREE.BackSide })
+);
+scene.add(atmosphere);
+
+const cloudGroup = new THREE.Group();
+scene.add(cloudGroup);
+
+for (let i = 0; i < 38; i++) {
+  const cloud = new THREE.Mesh(
+    new THREE.SphereGeometry(0.035 + Math.random() * 0.055, 12, 12),
+    new THREE.MeshBasicMaterial({ color:0xeafff8, transparent:true, opacity:0.32 })
   );
+  cloud.position.copy(randomPointOnSphere(R + 0.62 + Math.random() * 0.35));
+  cloud.scale.set(8 + Math.random() * 13, 1, 2 + Math.random() * 4);
+  cloud.lookAt(0, 0, 0);
+  cloudGroup.add(cloud);
 }
 
-function randomPointOnSphere() {
+const starGeometry = new THREE.BufferGeometry();
+const starPositions = [];
+for (let i = 0; i < 900; i++) {
+  const star = randomPointOnSphere(90 + Math.random() * 130);
+  starPositions.push(star.x, star.y, star.z);
+}
+starGeometry.setAttribute("position", new THREE.Float32BufferAttribute(starPositions, 3));
+const stars = new THREE.Points(starGeometry, new THREE.PointsMaterial({ color:0xcaffee, size:0.18, transparent:true, opacity:0.82 }));
+scene.add(stars);
+
+function makeSnakePart(isHead) {
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(isHead ? 0.34 : 0.27, 24, 24),
+    new THREE.MeshStandardMaterial({
+      color:isHead ? 0xe8fff4 : 0x00ff87,
+      emissive:isHead ? 0x113322 : 0x003d20,
+      roughness:0.28,
+      metalness:0.18
+    })
+  );
+  mesh.castShadow = true;
+  return mesh;
+}
+
+function randomPointOnSphere(radius = SURFACE) {
   return new THREE.Vector3(
     Math.random() - 0.5,
     Math.random() - 0.5,
     Math.random() - 0.5
-  ).normalize().multiplyScalar(R + 0.35);
+  ).normalize().multiplyScalar(radius);
 }
 
 function turnDirection(amount) {
@@ -112,48 +367,113 @@ function moveOnSphere(distance) {
   const angle = distance / R;
 
   headPos.applyAxisAngle(axis, angle);
-  headPos.normalize().multiplyScalar(R + 0.35);
+  headPos.normalize().multiplyScalar(SURFACE);
 
   const newUp = headPos.clone().normalize();
   forward.applyAxisAngle(axis, angle);
   forward.projectOnPlane(newUp).normalize();
 }
 
+function farFromSnake(pos, minDistance) {
+  return snake.every(part => part.distanceTo(pos) > minDistance);
+}
+
 function createFood() {
   if (foodMesh) scene.remove(foodMesh);
 
-  foodPos = randomPointOnSphere();
+  let nextFoodPos = null;
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const candidate = randomPointOnSphere();
+    if (farFromSnake(candidate, 1.7) && obstacleMeshes.every(o => o.position.distanceTo(candidate) > 1.4)) {
+      nextFoodPos = candidate;
+      break;
+    }
+  }
+  foodPos = nextFoodPos || randomPointOnSphere();
 
   foodMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.38, 32, 32),
-    new THREE.MeshStandardMaterial({ color:0xff3333, emissive:0x330000 })
+    new THREE.IcosahedronGeometry(0.42, 2),
+    new THREE.MeshStandardMaterial({ color:0xff4168, emissive:0x661023, roughness:0.25, metalness:0.12 })
   );
 
   foodMesh.position.copy(foodPos);
+  foodMesh.castShadow = true;
   scene.add(foodMesh);
+}
+
+function createObstacle() {
+  let pos = randomPointOnSphere();
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const candidate = randomPointOnSphere();
+    if (farFromSnake(candidate, 2.3) && (!foodPos || candidate.distanceTo(foodPos) > 2.2)) {
+      pos = candidate;
+      break;
+    }
+  }
+
+  const obstacle = new THREE.Mesh(
+    new THREE.ConeGeometry(0.33, 0.95, 7),
+    new THREE.MeshStandardMaterial({ color:0x7ed7ff, emissive:0x07324a, roughness:0.18, metalness:0.45 })
+  );
+  obstacle.position.copy(pos);
+  obstacle.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), pos.clone().normalize());
+  obstacle.castShadow = true;
+  obstacle.userData.spin = 0.01 + Math.random() * 0.025;
+  scene.add(obstacle);
+  obstacleMeshes.push(obstacle);
+}
+
+function resetObstacles() {
+  obstacleMeshes.forEach(mesh => scene.remove(mesh));
+  obstacleMeshes = [];
+  for (let i = 0; i < 4; i++) createObstacle();
+}
+
+function burst(position, color) {
+  for (let i = 0; i < 18; i++) {
+    const particle = new THREE.Mesh(
+      new THREE.SphereGeometry(0.045, 8, 8),
+      new THREE.MeshBasicMaterial({ color, transparent:true, opacity:1 })
+    );
+    particle.position.copy(position);
+    particle.userData.velocity = position.clone().normalize().multiplyScalar(0.035 + Math.random() * 0.035)
+      .add(randomPointOnSphere(1).multiplyScalar(0.025));
+    particle.userData.life = 1;
+    scene.add(particle);
+    particles.push(particle);
+  }
 }
 
 function resetGame() {
   score = 0;
+  level = 1;
+  boost = 1;
+  foodPos = null;
   scoreText.textContent = score;
+  levelText.textContent = level;
+  messageText.textContent = "Eat glowing fruit to spawn more hazards.";
+  boostFill.style.width = "100%";
   gameOver = false;
   gameOverBox.style.display = "none";
 
   snakeMeshes.forEach(m => scene.remove(m));
   snakeMeshes = [];
   snake = [];
+  particles.forEach(p => scene.remove(p));
+  particles = [];
 
-  headPos = new THREE.Vector3(0, R + 0.35, 0);
+  headPos = new THREE.Vector3(0, SURFACE, 0);
   forward = new THREE.Vector3(1, 0, 0);
 
   for (let i = 0; i < 35; i++) {
     const p = headPos.clone();
     p.x -= i * 0.12;
-    p.normalize().multiplyScalar(R + 0.35);
+    p.normalize().multiplyScalar(SURFACE);
     snake.push(p);
   }
 
   syncMeshes();
+  resetObstacles();
   createFood();
   updateCamera(true);
   updateMinimap();
@@ -181,8 +501,10 @@ function updateSnakeVisuals() {
     const up = snake[i].clone().normalize();
     snakeMeshes[i].quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), up);
 
-    snakeMeshes[i].material.color.set(i === 0 ? 0xb6ffd3 : 0x00ff77);
-    snakeMeshes[i].scale.setScalar(i === 0 ? 1.25 : 1);
+    const hue = 0.39 + Math.sin((i * 0.18) + performance.now() * 0.003) * 0.035;
+    snakeMeshes[i].material.color.setHSL(i === 0 ? 0.43 : hue, 1, i === 0 ? 0.92 : 0.52);
+    snakeMeshes[i].material.emissive.setHSL(0.42, 1, i === 0 ? 0.12 : 0.055);
+    snakeMeshes[i].scale.setScalar(i === 0 ? 1.28 : 1 - Math.min(i / snake.length, 1) * 0.18);
   }
 }
 
@@ -196,67 +518,114 @@ function growSnake(amount) {
   syncMeshes();
 }
 
-function endGame() {
+function endGame(reason) {
   gameOver = true;
+  messageText.textContent = reason;
+  best = Math.max(best, score);
+  localStorage.setItem("snakePlanetBest", String(best));
+  bestText.textContent = best;
+  finalScoreText.textContent = score;
+  finalBestText.textContent = best;
   gameOverBox.style.display = "grid";
+  burst(headPos, 0xff5c7a);
 }
 
 function updateCamera(instant = false) {
   const up = headPos.clone().normalize();
 
   const wantedPos = headPos.clone()
-    .add(forward.clone().multiplyScalar(-4.6))
-    .add(up.clone().multiplyScalar(1.5));
+    .add(forward.clone().multiplyScalar(-4.9))
+    .add(up.clone().multiplyScalar(1.65));
 
   if (instant) camera.position.copy(wantedPos);
   else camera.position.lerp(wantedPos, 0.22);
 
   const lookTarget = headPos.clone()
-    .add(forward.clone().multiplyScalar(3))
-    .add(up.clone().multiplyScalar(0.6));
+    .add(forward.clone().multiplyScalar(3.2))
+    .add(up.clone().multiplyScalar(0.55));
 
   camera.up.copy(up);
   camera.lookAt(lookTarget);
 }
 
 function updateMinimap() {
-  const cx = 85, cy = 85, radius = 72;
-  mapCtx.clearRect(0, 0, 170, 170);
+  const size = mapCanvas.width;
+  const cx = size / 2, cy = size / 2, radius = size * 0.42;
+  mapCtx.clearRect(0, 0, size, size);
 
+  const gradient = mapCtx.createRadialGradient(cx - 16, cy - 18, 10, cx, cy, radius);
+  gradient.addColorStop(0, "rgba(67,210,140,.95)");
+  gradient.addColorStop(1, "rgba(8,65,46,.92)");
   mapCtx.beginPath();
   mapCtx.arc(cx, cy, radius, 0, Math.PI * 2);
-  mapCtx.fillStyle = "rgba(20,90,55,.85)";
+  mapCtx.fillStyle = gradient;
   mapCtx.fill();
+
+  mapCtx.strokeStyle = "rgba(103,255,197,.5)";
+  mapCtx.lineWidth = 2;
+  mapCtx.stroke();
 
   function project(pos) {
     return {
       x: cx + (pos.x / R) * radius,
-      y: cy + (pos.z / R) * radius
+      y: cy + (pos.z / R) * radius,
+      hidden: pos.y < 0
     };
   }
+
+  obstacleMeshes.forEach(obstacle => {
+    const p = project(obstacle.position);
+    mapCtx.beginPath();
+    mapCtx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+    mapCtx.fillStyle = p.hidden ? "rgba(126,215,255,.28)" : "#7ed7ff";
+    mapCtx.fill();
+  });
 
   snake.forEach((s, i) => {
     const p = project(s);
     mapCtx.beginPath();
     mapCtx.arc(p.x, p.y, i === 0 ? 6 : 2, 0, Math.PI * 2);
-    mapCtx.fillStyle = i === 0 ? "white" : "#00ff77";
+    mapCtx.fillStyle = p.hidden ? "rgba(0,255,119,.24)" : (i === 0 ? "white" : "#00ff77");
     mapCtx.fill();
   });
 
   const f = project(foodPos);
   mapCtx.beginPath();
   mapCtx.arc(f.x, f.y, 5, 0, Math.PI * 2);
-  mapCtx.fillStyle = "red";
+  mapCtx.fillStyle = f.hidden ? "rgba(255,65,104,.35)" : "#ff4168";
   mapCtx.fill();
 }
 
-function update() {
-  if (gameOver) return;
+function updateParticles(delta) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const particle = particles[i];
+    particle.userData.life -= delta * 1.9;
+    particle.position.add(particle.userData.velocity.clone().multiplyScalar(delta * 60));
+    particle.material.opacity = Math.max(particle.userData.life, 0);
+    particle.scale.setScalar(Math.max(particle.userData.life, 0.05));
+    if (particle.userData.life <= 0) {
+      scene.remove(particle);
+      particles.splice(i, 1);
+    }
+  }
+}
 
-  if (keys["a"] || keys["ArrowLeft"]) turnDirection(0.045);
-  if (keys["d"] || keys["ArrowRight"]) turnDirection(-0.045);
+function update(delta) {
+  if (gameOver) {
+    updateParticles(delta);
+    return;
+  }
 
-  let speed = keys["w"] || keys["ArrowUp"] ? 0.13 : 0.075;
+  const turnSpeed = 0.045 * delta * 60;
+  if (keys["a"] || keys["ArrowLeft"]) turnDirection(turnSpeed);
+  if (keys["d"] || keys["ArrowRight"]) turnDirection(-turnSpeed);
+
+  const wantsBoost = keys["w"] || keys["ArrowUp"];
+  const canBoost = wantsBoost && boost > 0.02;
+  const baseSpeed = 0.075 + Math.min(score, 18) * 0.002;
+  const speed = (canBoost ? 0.142 : baseSpeed) * delta * 60;
+  boost = Math.min(1, Math.max(0, boost + (canBoost ? -0.42 : 0.22) * delta));
+  boostFill.style.width = `${Math.round(boost * 100)}%`;
 
   moveOnSphere(speed);
 
@@ -265,33 +634,55 @@ function update() {
   const maxLength = 35 + score * 8;
   while (snake.length > maxLength) snake.pop();
 
-  if (headPos.distanceTo(foodPos) < 0.75) {
+  if (headPos.distanceTo(foodPos) < 0.78) {
     score++;
+    level = 1 + Math.floor(score / 4);
     scoreText.textContent = score;
+    levelText.textContent = level;
     growSnake(8);
+    burst(foodPos, 0xffd166);
     createFood();
+    if (score % 2 === 0 && obstacleMeshes.length < 16) createObstacle();
+    messageText.textContent = score % 4 === 0 ? "Level up! The orbit is getting crowded." : "Nice catch! Keep carving the curve.";
   }
 
   for (let i = 20; i < snake.length; i++) {
     if (headPos.distanceTo(snake[i]) < 0.28) {
-      endGame();
+      endGame("You crossed your own glowing trail.");
       return;
     }
   }
 
+  for (const obstacle of obstacleMeshes) {
+    if (headPos.distanceTo(obstacle.position) < 0.62) {
+      endGame("A crystal meteor shattered the orbit.");
+      return;
+    }
+  }
+
+  obstacleMeshes.forEach(mesh => mesh.rotateY(mesh.userData.spin * delta * 60));
+  foodMesh.rotation.y += 0.03 * delta * 60;
+  foodMesh.rotation.x += 0.018 * delta * 60;
+  updateParticles(delta);
   updateSnakeVisuals();
   updateCamera();
   updateMinimap();
 }
 
-function animate() {
+function animate(now = performance.now()) {
   requestAnimationFrame(animate);
-  update();
+  const delta = Math.min((now - lastTime) / 1000, 0.05);
+  lastTime = now;
+
+  cloudGroup.rotation.y += delta * 0.025;
+  stars.rotation.y += delta * 0.006;
+  atmosphere.scale.setScalar(1 + Math.sin(now * 0.0016) * 0.006);
 
   if (foodMesh) {
-    foodMesh.scale.setScalar(1 + Math.sin(Date.now() * 0.006) * 0.12);
+    foodMesh.scale.setScalar(1 + Math.sin(now * 0.006) * 0.16);
   }
 
+  update(delta);
   renderer.render(scene, camera);
 }
 
