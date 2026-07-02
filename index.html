@@ -358,6 +358,8 @@ let powerUpMesh;
 let undergroundFoodPos;
 let undergroundFoodMesh;
 let undergroundGroup;
+let undergroundDust = [];
+let undergroundPebbles = [];
 let burrowTransition = null;
 let shieldMesh;
 let audioCtx;
@@ -373,7 +375,9 @@ const planet = new THREE.Mesh(
   new THREE.MeshStandardMaterial({
     color:0x1f7042,
     roughness:0.95,
-    metalness:0.04
+    metalness:0.04,
+    emissive:0x0b2f1d,
+    emissiveIntensity:0.28
   })
 );
 planet.receiveShadow = true;
@@ -419,6 +423,9 @@ function createUndergroundWorld() {
   grid.material.opacity = 0.28;
   undergroundGroup.add(grid);
 
+  undergroundDust = [];
+  undergroundPebbles = [];
+
   for (let i = 0; i < 90; i++) {
     const pebble = new THREE.Mesh(
       new THREE.DodecahedronGeometry(0.035 + Math.random() * 0.09, 0),
@@ -426,8 +433,46 @@ function createUndergroundWorld() {
     );
     pebble.position.set((Math.random() - 0.5) * 20, UNDERGROUND_Y - 0.04, (Math.random() - 0.5) * 20);
     pebble.scale.y = 0.45;
+    pebble.userData.baseScale = pebble.scale.clone();
+    pebble.userData.pulseUntil = 0;
+    pebble.userData.phase = Math.random() * Math.PI * 2;
     undergroundGroup.add(pebble);
+    undergroundPebbles.push(pebble);
   }
+
+  const dustMaterial = new THREE.MeshBasicMaterial({
+    color:0xd8b07a,
+    transparent:true,
+    opacity:0.16,
+    depthWrite:false,
+    blending:THREE.AdditiveBlending
+  });
+  for (let i = 0; i < 42; i++) {
+    const dust = new THREE.Mesh(
+      new THREE.SphereGeometry(0.035 + Math.random() * 0.09, 8, 8),
+      dustMaterial.clone()
+    );
+    const base = new THREE.Vector3(
+      (Math.random() - 0.5) * 19,
+      UNDERGROUND_Y + 0.2 + Math.random() * 1.45,
+      (Math.random() - 0.5) * 19
+    );
+    dust.position.copy(base);
+    dust.userData.base = base;
+    dust.userData.drift = new THREE.Vector3(
+      (Math.random() - 0.5) * 0.22,
+      0.08 + Math.random() * 0.18,
+      (Math.random() - 0.5) * 0.22
+    );
+    dust.userData.phase = Math.random() * Math.PI * 2;
+    dust.userData.radius = 0.12 + Math.random() * 0.38;
+    dust.userData.baseOpacity = 0.05 + Math.random() * 0.13;
+    dust.userData.baseScale = dust.scale.x;
+    undergroundGroup.add(dust);
+    undergroundDust.push(dust);
+  }
+  undergroundGroup.userData.dust = undergroundDust;
+  undergroundGroup.userData.pebbles = undergroundPebbles;
 }
 
 const starGeometry = new THREE.BufferGeometry();
@@ -657,6 +702,50 @@ function surfaceSnakeFrom(point) {
   );
 }
 
+function triggerUndergroundDustBurst(position, count = 24) {
+  if (!undergroundGroup) return;
+
+  const origin = new THREE.Vector3(
+    THREE.MathUtils.clamp(position.x, -TUNNEL_LIMIT, TUNNEL_LIMIT),
+    UNDERGROUND_Y + 0.06,
+    THREE.MathUtils.clamp(position.z, -TUNNEL_LIMIT, TUNNEL_LIMIT)
+  );
+
+  for (let i = 0; i < count; i++) {
+    const dust = new THREE.Mesh(
+      new THREE.SphereGeometry(0.035 + Math.random() * 0.075, 8, 8),
+      new THREE.MeshBasicMaterial({
+        color:0xd9aa72,
+        transparent:true,
+        opacity:0.34,
+        depthWrite:false,
+        blending:THREE.AdditiveBlending
+      })
+    );
+    dust.position.copy(origin);
+    dust.userData.velocity = new THREE.Vector3(
+      (Math.random() - 0.5) * 0.08,
+      0.025 + Math.random() * 0.055,
+      (Math.random() - 0.5) * 0.08
+    );
+    dust.userData.life = 0.65 + Math.random() * 0.35;
+    dust.userData.maxLife = dust.userData.life;
+    undergroundGroup.add(dust);
+    particles.push(dust);
+  }
+}
+
+function pulseNearbyPebbles(position, radius = 2.6) {
+  undergroundPebbles.forEach(pebble => {
+    const distance = pebble.position.distanceTo(position);
+    if (distance < radius) {
+      pebble.userData.pulseUntil = elapsedTime + 0.8;
+      pebble.userData.pulseStrength = Math.max(pebble.userData.pulseStrength || 0, 1 - distance / radius);
+      if (pebble.material.emissive) pebble.material.emissive.setHex(0x3b1d08);
+    }
+  });
+}
+
 function beginBurrowTransition(direction) {
   if (burrowTransition || gameOver) return;
 
@@ -687,6 +776,7 @@ function beginBurrowTransition(direction) {
     lastBurst: 0
   };
 
+  triggerUndergroundDustBurst(tunnelPoint, goingDown ? 34 : 26);
   showToast(goingDown ? "Digging down!" : "Digging up!");
   messageText.textContent = goingDown
     ? "The snake drills through the crust into the muddy tunnels..."
@@ -719,6 +809,7 @@ function finishBurrowTransition() {
     messageText.textContent = "Back on the planet. Crystal traps can hit you again.";
   }
 
+  triggerUndergroundDustBurst(goingDown ? headPos : burrowTransition.tunnelPoint, goingDown ? 28 : 42);
   burst(headPos, 0xb07a45);
   playTone(goingDown ? 160 : 310, 0.15, "sawtooth", 0.045);
   burrowTransition = null;
@@ -757,6 +848,7 @@ function updateBurrowTransition(delta) {
     burrowTransition.lastBurst = 0;
   }
 
+  updateUndergroundAmbience(delta);
   updateParticles(delta);
   updateSnakeVisuals();
   updateCamera();
@@ -1157,10 +1249,30 @@ function updateParticles(delta) {
     particle.material.opacity = Math.max(particle.userData.life, 0);
     particle.scale.setScalar(Math.max(particle.userData.life, 0.05));
     if (particle.userData.life <= 0) {
-      scene.remove(particle);
+      if (particle.parent) particle.parent.remove(particle);
+      else scene.remove(particle);
       particles.splice(i, 1);
     }
   }
+}
+
+function updateUndergroundAmbience(delta) {
+  undergroundDust.forEach((dust, i) => {
+    const phase = elapsedTime * (0.35 + i * 0.004) + dust.userData.phase;
+    const bob = Math.sin(phase * 1.7) * 0.08;
+    dust.position.copy(dust.userData.base)
+      .add(dust.userData.drift.clone().multiplyScalar((elapsedTime * 0.35 + i * 0.07) % 1))
+      .add(new THREE.Vector3(Math.sin(phase) * dust.userData.radius, bob, Math.cos(phase * 0.8) * dust.userData.radius));
+    dust.material.opacity = dust.userData.baseOpacity * (0.65 + (Math.sin(phase * 2.2) + 1) * 0.3);
+    dust.scale.setScalar(dust.userData.baseScale * (0.8 + (Math.sin(phase * 1.4) + 1) * 0.22));
+  });
+
+  undergroundPebbles.forEach(pebble => {
+    const remaining = Math.max(0, pebble.userData.pulseUntil - elapsedTime);
+    const pulse = remaining > 0 ? Math.sin(remaining * Math.PI * 5) * remaining * (pebble.userData.pulseStrength || 0.5) : 0;
+    pebble.scale.copy(pebble.userData.baseScale).multiplyScalar(1 + Math.max(0, pulse) * 0.18);
+    if (pebble.material.emissiveIntensity !== undefined) pebble.material.emissiveIntensity = Math.max(0, pulse) * 0.8;
+  });
 }
 
 function update(delta) {
@@ -1226,6 +1338,8 @@ function update(delta) {
     comboText.textContent = `x${combo}`;
     growSnake(6 + combo);
     burst(undergroundFoodPos, 0xffc15a);
+    triggerUndergroundDustBurst(undergroundFoodPos, 18 + combo * 4);
+    pulseNearbyPebbles(undergroundFoodPos);
     playTone(260 + combo * 70, 0.12, "triangle", 0.05);
     showToast(combo > 1 ? `Mud combo x${combo}!` : "Root snack!");
     createUndergroundFood();
@@ -1301,6 +1415,7 @@ function update(delta) {
     undergroundFoodMesh.rotation.y += 0.035 * delta * 60;
     undergroundFoodMesh.scale.setScalar(1 + Math.sin(performance.now() * 0.006) * 0.13);
   }
+  updateUndergroundAmbience(delta);
   updateParticles(delta);
   updateSnakeVisuals();
   updateCamera();
@@ -1312,6 +1427,10 @@ function animate(now = performance.now()) {
   const delta = Math.min((now - lastTime) / 1000, 0.05);
   lastTime = now;
 
+  const planetPulse = (Math.sin(now * 0.0012) + 1) / 2;
+  planet.rotation.y += delta * 0.004;
+  planet.material.emissiveIntensity = 0.22 + planetPulse * 0.18;
+  planet.material.color.setHSL(0.39 + Math.sin(now * 0.00035) * 0.018, 0.56, 0.26 + planetPulse * 0.025);
   cloudGroup.rotation.y += delta * 0.025;
   stars.rotation.y += delta * 0.006;
   atmosphere.scale.setScalar(1 + Math.sin(now * 0.0016) * 0.006);
