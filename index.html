@@ -358,6 +358,7 @@ let powerUpMesh;
 let undergroundFoodPos;
 let undergroundFoodMesh;
 let undergroundGroup;
+let burrowTransition = null;
 let shieldMesh;
 let audioCtx;
 let shake = 0;
@@ -610,50 +611,148 @@ function createUndergroundFood() {
   undergroundGroup.add(undergroundFoodMesh);
 }
 
-function enterUnderground() {
-  if (underground || gameOver) return;
-  underground = true;
-  undergroundGroup.visible = true;
-  planet.visible = false;
-  atmosphere.visible = false;
-  cloudGroup.visible = false;
-  obstacleMeshes.forEach(mesh => mesh.visible = false);
-  landmarkMeshes.forEach(mesh => mesh.visible = false);
-  if (foodMesh) foodMesh.visible = false;
-  if (powerUpMesh) powerUpMesh.visible = false;
-  if (!undergroundFoodMesh) createUndergroundFood();
-
-  const old = headPos.clone();
-  headPos.set(THREE.MathUtils.clamp(old.x, -TUNNEL_LIMIT, TUNNEL_LIMIT), UNDERGROUND_Y, THREE.MathUtils.clamp(old.z, -TUNNEL_LIMIT, TUNNEL_LIMIT));
-  forward.set(1, 0, 0);
-  snake = snake.map((part, i) => new THREE.Vector3(
-    THREE.MathUtils.clamp(headPos.x - i * 0.18, -TUNNEL_LIMIT, TUNNEL_LIMIT),
+function undergroundSnakeFrom(point) {
+  const start = new THREE.Vector3(
+    THREE.MathUtils.clamp(point.x, -TUNNEL_LIMIT, TUNNEL_LIMIT),
     UNDERGROUND_Y,
-    headPos.z
+    THREE.MathUtils.clamp(point.z, -TUNNEL_LIMIT, TUNNEL_LIMIT)
+  );
+
+  return snake.map((part, i) => new THREE.Vector3(
+    THREE.MathUtils.clamp(start.x - i * 0.18, -TUNNEL_LIMIT, TUNNEL_LIMIT),
+    UNDERGROUND_Y,
+    start.z
   ));
-  showToast("Burrowed underground");
-  messageText.textContent = "Mud tunnel mode: traps are above you. Find roots and press Space to jump back to the sphere.";
 }
 
-function exitUnderground() {
-  if (!underground) return;
-  underground = false;
-  undergroundGroup.visible = false;
+function surfaceSnakeFrom(point) {
+  const launch = new THREE.Vector3(point.x, R, point.z).normalize().multiplyScalar(SURFACE);
+  const surfaceForward = new THREE.Vector3(1, 0, 0).projectOnPlane(launch.clone().normalize()).normalize();
+
+  return snake.map((part, i) => launch.clone()
+    .add(surfaceForward.clone().multiplyScalar(-i * 0.12))
+    .normalize()
+    .multiplyScalar(SURFACE)
+  );
+}
+
+function beginBurrowTransition(direction) {
+  if (burrowTransition || gameOver) return;
+
+  const goingDown = direction === "down";
+  const from = snake.map(part => part.clone());
+  const to = goingDown ? undergroundSnakeFrom(headPos) : surfaceSnakeFrom(headPos);
+  const surfacePoint = goingDown ? headPos.clone() : to[0].clone();
+  const tunnelPoint = goingDown ? to[0].clone() : headPos.clone();
+
+  undergroundGroup.visible = true;
+  if (!undergroundFoodMesh) createUndergroundFood();
   planet.visible = true;
   atmosphere.visible = true;
   cloudGroup.visible = true;
-  obstacleMeshes.forEach(mesh => mesh.visible = true);
-  landmarkMeshes.forEach(mesh => mesh.visible = true);
-  if (foodMesh) foodMesh.visible = true;
-  if (powerUpMesh) powerUpMesh.visible = true;
+  obstacleMeshes.forEach(mesh => mesh.visible = !goingDown);
+  landmarkMeshes.forEach(mesh => mesh.visible = !goingDown);
+  if (foodMesh) foodMesh.visible = !goingDown;
+  if (powerUpMesh) powerUpMesh.visible = !goingDown;
 
-  const launch = new THREE.Vector3(headPos.x, R, headPos.z).normalize();
-  headPos.copy(launch.multiplyScalar(SURFACE));
-  forward.set(1, 0, 0).projectOnPlane(headPos.clone().normalize()).normalize();
-  snake = snake.map((part, i) => headPos.clone().add(forward.clone().multiplyScalar(-i * 0.12)).normalize().multiplyScalar(SURFACE));
+  burrowTransition = {
+    direction,
+    elapsed: 0,
+    duration: 1.05,
+    from,
+    to,
+    surfacePoint,
+    tunnelPoint,
+    lastBurst: 0
+  };
+
+  showToast(goingDown ? "Digging down!" : "Digging up!");
+  messageText.textContent = goingDown
+    ? "The snake drills through the crust into the muddy tunnels..."
+    : "The snake is tunneling upward and about to burst back onto the planet.";
+}
+
+function finishBurrowTransition() {
+  const goingDown = burrowTransition.direction === "down";
+  snake = burrowTransition.to.map(part => part.clone());
+  headPos.copy(snake[0]);
+
+  if (goingDown) {
+    underground = true;
+    forward.set(1, 0, 0);
+    planet.visible = false;
+    atmosphere.visible = false;
+    cloudGroup.visible = false;
+    messageText.textContent = "Mud tunnel mode: traps are above you. Find roots and press Space to jump back to the sphere.";
+  } else {
+    underground = false;
+    undergroundGroup.visible = false;
+    planet.visible = true;
+    atmosphere.visible = true;
+    cloudGroup.visible = true;
+    obstacleMeshes.forEach(mesh => mesh.visible = true);
+    landmarkMeshes.forEach(mesh => mesh.visible = true);
+    if (foodMesh) foodMesh.visible = true;
+    if (powerUpMesh) powerUpMesh.visible = true;
+    forward.set(1, 0, 0).projectOnPlane(headPos.clone().normalize()).normalize();
+    messageText.textContent = "Back on the planet. Crystal traps can hit you again.";
+  }
+
   burst(headPos, 0xb07a45);
-  showToast("Jumped back up!");
-  messageText.textContent = "Back on the planet. Crystal traps can hit you again.";
+  playTone(goingDown ? 160 : 310, 0.15, "sawtooth", 0.045);
+  burrowTransition = null;
+}
+
+function updateBurrowTransition(delta) {
+  if (!burrowTransition) return false;
+
+  burrowTransition.elapsed += delta;
+  const progress = Math.min(burrowTransition.elapsed / burrowTransition.duration, 1);
+  const eased = progress < 0.5
+    ? 4 * progress * progress * progress
+    : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+  const diveArc = Math.sin(progress * Math.PI) * 0.9;
+
+  for (let i = 0; i < snake.length; i++) {
+    const from = burrowTransition.from[i] || burrowTransition.from[burrowTransition.from.length - 1];
+    const to = burrowTransition.to[i] || burrowTransition.to[burrowTransition.to.length - 1];
+    snake[i].copy(from).lerp(to, eased);
+
+    if (burrowTransition.direction === "down") {
+      snake[i].add(from.clone().normalize().multiplyScalar(-diveArc));
+    } else {
+      snake[i].add(to.clone().normalize().multiplyScalar(diveArc));
+    }
+  }
+
+  headPos.copy(snake[0]);
+
+  burrowTransition.lastBurst += delta;
+  if (burrowTransition.lastBurst > 0.08) {
+    const emitter = burrowTransition.direction === "down"
+      ? burrowTransition.surfacePoint
+      : burrowTransition.tunnelPoint;
+    burst(emitter, 0xb07a45);
+    burrowTransition.lastBurst = 0;
+  }
+
+  updateParticles(delta);
+  updateSnakeVisuals();
+  updateCamera();
+  updateMinimap();
+
+  if (progress >= 1) finishBurrowTransition();
+  return true;
+}
+
+function enterUnderground() {
+  if (underground || burrowTransition || gameOver) return;
+  beginBurrowTransition("down");
+}
+
+function exitUnderground() {
+  if (!underground || burrowTransition) return;
+  beginBurrowTransition("up");
 }
 
 function createPowerUp() {
@@ -734,6 +833,7 @@ function resetGame() {
   shield = 0;
   boost = 1;
   underground = false;
+  burrowTransition = null;
   foodPos = null;
   scoreText.textContent = score;
   levelText.textContent = level;
@@ -846,6 +946,23 @@ function endGame(reason) {
 }
 
 function updateCamera(instant = false) {
+  if (burrowTransition) {
+    const progress = Math.min(burrowTransition.elapsed / burrowTransition.duration, 1);
+    const cameraDepth = burrowTransition.direction === "down" ? progress : 1 - progress;
+    const topDown = headPos.clone().add(new THREE.Vector3(0, 6 + cameraDepth * 7, 0));
+    const surfaceUp = burrowTransition.surfacePoint.clone().normalize();
+    const surfaceCam = burrowTransition.surfacePoint.clone()
+      .add(forward.clone().multiplyScalar(-4.2))
+      .add(surfaceUp.multiplyScalar(1.9));
+    const wantedPos = surfaceCam.lerp(topDown, cameraDepth);
+
+    if (instant) camera.position.copy(wantedPos);
+    else camera.position.lerp(wantedPos, 0.24);
+    camera.up.copy(new THREE.Vector3(0, 1, 0).lerp(new THREE.Vector3(0, 0, -1), cameraDepth).normalize());
+    camera.lookAt(headPos);
+    return;
+  }
+
   if (underground) {
     const wantedPos = headPos.clone().add(new THREE.Vector3(0, 13, 0));
     if (shake > 0) {
@@ -973,6 +1090,8 @@ function update(delta) {
     updateParticles(delta);
     return;
   }
+
+  if (updateBurrowTransition(delta)) return;
 
   const turnSpeed = 0.045 * delta * 60;
   if (!underground && (keys["a"] || keys["ArrowLeft"])) turnDirection(turnSpeed);
